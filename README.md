@@ -48,10 +48,9 @@ A menu bar / system tray app that shows your Claude usage at a glance — rate l
 ### Linux (Ubuntu/Debian)
 
 ```sh
-# Download the .deb from the latest release
-sudo dpkg -i claude-usage_1.1.0_all.deb
-sudo apt-get -f install   # install dependencies if needed
-claude-usage              # launch
+# Download the .deb from the latest release, then:
+sudo apt install ./claude-usage_1.1.0_all.deb
+claude-usage
 ```
 
 Or build from source:
