@@ -4,10 +4,10 @@
 
 # Claude Usage
 
-A macOS menu bar app that shows your Claude usage at a glance — rate limits, token stats, and more.
+A menu bar / system tray app that shows your Claude usage at a glance — rate limits, token stats, and more. Available for **macOS** and **Linux**.
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
-![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
+![Ubuntu 22.04+](https://img.shields.io/badge/Ubuntu-22.04%2B-E95420)
 ![License](https://img.shields.io/badge/license-BSD--2--Clause-green)
 
 ## Features
@@ -31,27 +31,36 @@ A macOS menu bar app that shows your Claude usage at a glance — rate limits, t
 - No authentication required — works offline
 
 ### General
-- Built-in update checks via Sparkle
-- Minimal dependencies — SwiftUI, Swift Charts, and Sparkle
-- Runs entirely in the menu bar (no dock icon)
+- Runs in the menu bar (macOS) or system tray (Linux)
+- Minimal dependencies
+- macOS: SwiftUI, Swift Charts, Sparkle
+- Linux: Python, GTK4, AppIndicator3
 
 ## Install
 
-### Download
+### macOS
 
 1. Download `ClaudeUsage.dmg` from the [latest release](https://github.com/chaoyupeng/claude-usage/releases/latest)
 2. Open the disk image and drag `ClaudeUsage.app` into `Applications`
 3. **Right-click** the app → **Open** (don't double-click — macOS blocks unsigned apps on first launch)
 4. Click **Open** on the confirmation dialog — the app appears in the menu bar
 
-### Build from source
+### Linux (Ubuntu/Debian)
 
-Requires Swift 5.9+ and macOS 14 (Sonoma) or later.
+```sh
+# Download the .deb from the latest release
+sudo dpkg -i claude-usage_1.1.0_all.deb
+sudo apt-get -f install   # install dependencies if needed
+claude-usage              # launch
+```
+
+Or build from source:
 
 ```sh
 git clone https://github.com/chaoyupeng/claude-usage.git
-cd claude-usage-bar/macos
-swift build -c release
+cd claude-usage/linux
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-ayatanaappindicator3-0.1 gir1.2-notify-0.7
+python3 -m claude_usage
 ```
 
 ## Usage
@@ -75,7 +84,23 @@ Token stats are read directly from `~/.claude/projects/` JSONL logs. No data is 
 ## Project structure
 
 ```
-macos/
+linux/                              # Linux system tray app (Python/GTK4)
+├── claude_usage/
+│   ├── app.py                      # GTK application, service wiring
+│   ├── models.py                   # API response types
+│   ├── usage_service.py            # OAuth, polling, API calls
+│   ├── log_service.py              # JSONL log file scanner
+│   ├── log_models.py               # Log parser and aggregation
+│   ├── tray_icon.py                # AppIndicator3 system tray
+│   ├── main_window.py              # GTK4 window with tabs
+│   ├── usage_tab.py                # Usage tab UI
+│   ├── token_dashboard.py          # Tokens tab UI
+│   ├── usage_chart.py              # Cairo chart with interpolation
+│   └── ...
+├── packaging/                      # .deb packaging
+└── tests/
+
+macos/                              # macOS menu bar app (Swift/SwiftUI)
 ├── Sources/ClaudeUsageBar/
 │   ├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup
 │   ├── UsageService.swift           # OAuth, polling, API calls

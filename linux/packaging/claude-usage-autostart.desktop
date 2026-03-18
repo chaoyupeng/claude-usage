@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Claude Usage
+Comment=Monitor your Claude API usage
+Exec=claude-usage
+Icon=claude-usage
+Type=Application
+Categories=Utility;Monitor;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

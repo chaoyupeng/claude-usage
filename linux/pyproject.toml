@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-usage"
+version = "1.1.0"
+description = "Menu bar app showing Claude API usage"
+requires-python = ">=3.10"
+dependencies = [
+    "PyGObject>=3.42",
+    "pycairo>=1.20",
+]
+
+[project.scripts]
+claude-usage = "claude_usage.__main__:main"
