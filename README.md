@@ -41,8 +41,11 @@ A macOS menu bar app that shows your Claude usage at a glance — rate limits, t
 
 1. Download `ClaudeUsage.dmg` from the [latest release](https://github.com/chaoyupeng/claude-usage/releases/latest)
 2. Open the disk image and drag `ClaudeUsage.app` into `Applications`
-3. Launch the app — it appears in the menu bar
-4. macOS may require right-click → **Open** on first launch
+3. On first launch, macOS may show "damaged" or "unidentified developer" — run this in Terminal:
+   ```sh
+   xattr -cr /Applications/ClaudeUsage.app
+   ```
+4. Launch the app — it appears in the menu bar
 
 ### Build from source
 
