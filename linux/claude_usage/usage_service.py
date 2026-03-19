@@ -39,6 +39,7 @@ _REDIRECT_URI = "https://platform.claude.com/oauth/code/callback"
 _DEFAULT_SCOPES = ["user:profile", "user:inference"]
 _BETA_HEADER = "oauth-2025-04-20"
 _MAX_BACKOFF_INTERVAL = 3600.0  # 1 hour
+_USER_AGENT = "ClaudeUsage/1.1.0"
 
 
 # ---------------------------------------------------------------------------
@@ -216,12 +217,15 @@ class UsageService:
         req = urllib.request.Request(
             self._token_endpoint,
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": _USER_AGENT,
+            },
             method="POST",
         )
 
         try:
-            resp = urllib.request.urlopen(req)
+            resp = urllib.request.urlopen(req, timeout=15)
             data = resp.read()
             resp_json = json.loads(data)
         except urllib.error.HTTPError as e:
@@ -459,9 +463,10 @@ class UsageService:
         req = urllib.request.Request(url, method="GET")
         req.add_header("Authorization", f"Bearer {token}")
         req.add_header("anthropic-beta", _BETA_HEADER)
+        req.add_header("User-Agent", _USER_AGENT)
 
         try:
-            resp = urllib.request.urlopen(req)
+            resp = urllib.request.urlopen(req, timeout=15)
             return (resp.status, resp.read(), dict(resp.headers))
         except urllib.error.HTTPError as e:
             body = b""
@@ -497,12 +502,15 @@ class UsageService:
             req = urllib.request.Request(
                 self._token_endpoint,
                 data=json.dumps(body).encode(),
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": _USER_AGENT,
+                },
                 method="POST",
             )
 
             try:
-                resp = urllib.request.urlopen(req)
+                resp = urllib.request.urlopen(req, timeout=15)
                 resp_data = resp.read()
                 status = resp.status
             except urllib.error.HTTPError as e:

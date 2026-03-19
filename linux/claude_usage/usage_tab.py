@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 # Helpers
 # ---------------------------------------------------------------------------
 
+_USAGE_COLOR_CLASSES = ("usage-low", "usage-medium", "usage-high")
+
+
 def _format_time_remaining(resets_at: Optional[str]) -> str:
     """Return a human-readable string like 'Resets in 2h 14m'."""
     if not resets_at:
@@ -63,6 +66,18 @@ def _time_ago_text(dt: Optional[datetime]) -> str:
     return f"Updated {hours}h {minutes % 60}m ago"
 
 
+def _apply_usage_color(bar: Gtk.ProgressBar, utilization: float) -> None:
+    """Apply green/yellow/red CSS class based on utilization (0-100)."""
+    for cls in _USAGE_COLOR_CLASSES:
+        bar.remove_css_class(cls)
+    if utilization < 60:
+        bar.add_css_class("usage-low")
+    elif utilization < 80:
+        bar.add_css_class("usage-medium")
+    else:
+        bar.add_css_class("usage-high")
+
+
 # ---------------------------------------------------------------------------
 # UsageBucketRow — reusable widget for a single usage bucket
 # ---------------------------------------------------------------------------
@@ -70,12 +85,12 @@ def _time_ago_text(dt: Optional[datetime]) -> str:
 class UsageBucketRow(Gtk.Box):
     """A labelled progress bar for a usage bucket (5-hour or 7-day)."""
 
-    def __init__(self, label_text: str, bar_css_class: str = "") -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    def __init__(self, label_text: str) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         self.set_margin_start(12)
         self.set_margin_end(12)
-        self.set_margin_top(4)
-        self.set_margin_bottom(4)
+        self.set_margin_top(2)
+        self.set_margin_bottom(2)
 
         # Top row: label and percentage
         top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
@@ -96,8 +111,6 @@ class UsageBucketRow(Gtk.Box):
         # Progress bar
         self._bar = Gtk.ProgressBar()
         self._bar.set_hexpand(True)
-        if bar_css_class:
-            self._bar.add_css_class(bar_css_class)
         self.append(self._bar)
 
         # Reset timer text
@@ -111,10 +124,13 @@ class UsageBucketRow(Gtk.Box):
             self._pct_label.set_text("-%")
             self._bar.set_fraction(0.0)
             self._reset_label.set_text("")
+            for cls in _USAGE_COLOR_CLASSES:
+                self._bar.remove_css_class(cls)
             return
         utilization = bucket.utilization or 0.0
         self._pct_label.set_text(_pct_text(utilization))
         self._bar.set_fraction(max(0.0, min(1.0, utilization / 100.0)))
+        _apply_usage_color(self._bar, utilization)
         self._reset_label.set_text(_format_time_remaining(bucket.resets_at))
 
 
@@ -129,22 +145,18 @@ class UsageTab(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._app = app_controller
 
-        # Scrolled wrapper
-        self._scroll = Gtk.ScrolledWindow()
-        self._scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self._scroll.set_vexpand(True)
-
-        self._content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        self._content_box.set_margin_top(8)
-        self._content_box.set_margin_bottom(8)
-        self._scroll.set_child(self._content_box)
-        self.append(self._scroll)
+        # Direct content box (no ScrolledWindow — content should fit)
+        self._content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._content_box.set_margin_top(4)
+        self._content_box.set_margin_bottom(4)
+        self._content_box.set_vexpand(True)
+        self.append(self._content_box)
 
         # ------ Sign-in widgets (hidden when authenticated) ------
         self._sign_in_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self._sign_in_box.set_margin_start(24)
         self._sign_in_box.set_margin_end(24)
-        self._sign_in_box.set_margin_top(48)
+        self._sign_in_box.set_margin_top(24)
         self._sign_in_box.set_valign(Gtk.Align.CENTER)
         self._sign_in_box.set_vexpand(True)
 
@@ -163,7 +175,7 @@ class UsageTab(Gtk.Box):
         self._code_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self._code_box.set_visible(False)
 
-        code_label = Gtk.Label(label="Paste the authorization code:")
+        code_label = Gtk.Label(label='Click "Copy Code" and paste the full code:')
         code_label.add_css_class("dim-label")
         self._code_box.append(code_label)
 
@@ -174,17 +186,29 @@ class UsageTab(Gtk.Box):
         self._code_entry.connect("activate", self._on_code_submit)
         code_row.append(self._code_entry)
 
-        submit_btn = Gtk.Button(label="Submit")
-        submit_btn.add_css_class("suggested-action")
-        submit_btn.connect("clicked", self._on_code_submit)
-        code_row.append(submit_btn)
+        self._submit_btn = Gtk.Button(label="Submit")
+        self._submit_btn.add_css_class("suggested-action")
+        self._submit_btn.connect("clicked", self._on_code_submit)
+        code_row.append(self._submit_btn)
+
+        self._submit_spinner = Gtk.Spinner()
+        self._submit_spinner.set_visible(False)
+        code_row.append(self._submit_spinner)
 
         self._code_box.append(code_row)
+
+        # Error label (shown when auth fails)
+        self._sign_in_error = Gtk.Label(label="")
+        self._sign_in_error.set_wrap(True)
+        self._sign_in_error.set_visible(False)
+        self._sign_in_error.add_css_class("error")
+        self._code_box.append(self._sign_in_error)
+
         self._sign_in_box.append(self._code_box)
         self._content_box.append(self._sign_in_box)
 
         # ------ Authenticated content (hidden when not signed in) ------
-        self._auth_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._auth_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self._auth_box.set_visible(False)
 
         # Error banner
@@ -202,6 +226,13 @@ class UsageTab(Gtk.Box):
         self._bucket_5h = UsageBucketRow("5-hour window")
         self._auth_box.append(self._bucket_5h)
 
+        # Thin separator
+        sep1 = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep1.add_css_class("thin")
+        sep1.set_margin_start(12)
+        sep1.set_margin_end(12)
+        self._auth_box.append(sep1)
+
         # 7-day bucket
         self._bucket_7d = UsageBucketRow("7-day window")
         self._auth_box.append(self._bucket_7d)
@@ -210,14 +241,14 @@ class UsageTab(Gtk.Box):
         self._model_frame = Gtk.Frame()
         self._model_frame.set_margin_start(12)
         self._model_frame.set_margin_end(12)
-        self._model_frame.set_margin_top(4)
+        self._model_frame.set_margin_top(2)
         self._model_frame.set_visible(False)
 
         model_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         model_inner.set_margin_start(8)
         model_inner.set_margin_end(8)
-        model_inner.set_margin_top(8)
-        model_inner.set_margin_bottom(8)
+        model_inner.set_margin_top(6)
+        model_inner.set_margin_bottom(6)
 
         model_header = Gtk.Label(label="Per-model (7-day)", xalign=0)
         model_header.add_css_class("caption-heading")
@@ -235,14 +266,14 @@ class UsageTab(Gtk.Box):
         self._extra_frame = Gtk.Frame()
         self._extra_frame.set_margin_start(12)
         self._extra_frame.set_margin_end(12)
-        self._extra_frame.set_margin_top(4)
+        self._extra_frame.set_margin_top(2)
         self._extra_frame.set_visible(False)
 
         extra_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         extra_inner.set_margin_start(8)
         extra_inner.set_margin_end(8)
-        extra_inner.set_margin_top(8)
-        extra_inner.set_margin_bottom(8)
+        extra_inner.set_margin_top(6)
+        extra_inner.set_margin_bottom(6)
 
         extra_header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         extra_title = Gtk.Label(label="Extra usage", xalign=0)
@@ -261,6 +292,7 @@ class UsageTab(Gtk.Box):
 
         self._extra_bar = Gtk.ProgressBar()
         self._extra_bar.set_hexpand(True)
+        self._extra_bar.add_css_class("usage-extra")
         extra_inner.append(self._extra_bar)
 
         self._extra_frame.set_child(extra_inner)
@@ -272,15 +304,15 @@ class UsageTab(Gtk.Box):
         self._chart = UsageChart()
         self._chart.set_margin_start(12)
         self._chart.set_margin_end(12)
-        self._chart.set_margin_top(8)
+        self._chart.set_margin_top(4)
         self._auth_box.append(self._chart)
 
         # "Updated X ago" label
         self._updated_label = Gtk.Label(label="", xalign=0.5)
         self._updated_label.add_css_class("dim-label")
         self._updated_label.add_css_class("caption")
-        self._updated_label.set_margin_top(8)
-        self._updated_label.set_margin_bottom(4)
+        self._updated_label.set_margin_top(4)
+        self._updated_label.set_margin_bottom(2)
         self._auth_box.append(self._updated_label)
 
         self._content_box.append(self._auth_box)
@@ -319,9 +351,12 @@ class UsageTab(Gtk.Box):
         if bucket is None or bucket.utilization is None:
             bar.set_fraction(0.0)
             pct_label.set_text("-%")
+            for cls in _USAGE_COLOR_CLASSES:
+                bar.remove_css_class(cls)
             return
         frac = max(0.0, min(1.0, bucket.utilization / 100.0))
         bar.set_fraction(frac)
+        _apply_usage_color(bar, bucket.utilization)
         pct_label.set_text(f"{bucket.utilization:.0f}%")
 
     # ------------------------------------------------------------------
@@ -337,8 +372,14 @@ class UsageTab(Gtk.Box):
         if not is_authenticated:
             self._sign_in_box.set_visible(True)
             self._auth_box.set_visible(False)
+            if last_error:
+                self._sign_in_error.set_text(last_error)
+                self._sign_in_error.set_visible(True)
+            else:
+                self._sign_in_error.set_visible(False)
             return
 
+        self._sign_in_error.set_visible(False)
         self._sign_in_box.set_visible(False)
         self._code_box.set_visible(False)
         self._auth_box.set_visible(True)
@@ -415,4 +456,18 @@ class UsageTab(Gtk.Box):
     def _on_code_submit(self, _widget: Gtk.Widget) -> None:
         code = self._code_entry.get_text().strip()
         if code:
+            self._set_submit_loading(True)
             self._app.submit_code(code)
+
+    def _set_submit_loading(self, loading: bool) -> None:
+        self._submit_btn.set_sensitive(not loading)
+        self._code_entry.set_sensitive(not loading)
+        self._submit_spinner.set_visible(loading)
+        if loading:
+            self._submit_spinner.start()
+        else:
+            self._submit_spinner.stop()
+
+    def reset_submit_state(self) -> None:
+        """Called after auth submission completes (success or failure)."""
+        self._set_submit_loading(False)

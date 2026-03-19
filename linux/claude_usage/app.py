@@ -26,7 +26,11 @@ class Application(Gtk.Application):
     """Claude Usage system-tray application."""
 
     def __init__(self) -> None:
-        super().__init__(application_id="com.local.claude-usage")
+        from gi.repository import Gio
+        super().__init__(
+            application_id="com.local.claude-usage",
+            flags=Gio.ApplicationFlags.DEFAULT_FLAGS,
+        )
 
         # Services — created during activate
         self.usage_service: Optional[UsageService] = None
@@ -36,7 +40,7 @@ class Application(Gtk.Application):
 
         # UI components
         self._window: Optional["MainWindow"] = None  # noqa: F821
-        self._tray: Optional["TrayIcon"] = None  # noqa: F821
+        self._tray: Optional["TrayProxy"] = None  # noqa: F821
 
         # Polling handle
         self._poll_source_id: Optional[int] = None
@@ -66,10 +70,10 @@ class Application(Gtk.Application):
         # Load persisted data
         self.history_service.load_history()
 
-        # Create tray icon (import here to avoid early gi.require_version conflicts)
-        from .tray_icon import TrayIcon
+        # Tray icon runs in a GTK3 subprocess (cannot mix GTK3 + GTK4)
+        from .tray_proxy import TrayProxy
 
-        self._tray = TrayIcon(
+        self._tray = TrayProxy(
             on_open=self._on_tray_open,
             on_refresh=self._on_tray_refresh,
             on_quit=self._on_tray_quit,
@@ -218,6 +222,7 @@ class Application(Gtk.Application):
             self._fetch_profile_async()
         if self._window is not None:
             self._window.update_usage(svc.usage, svc.last_error)
+            self._window.reset_submit_state()
         return False
 
     def sign_out(self) -> None:
@@ -233,7 +238,7 @@ class Application(Gtk.Application):
 
     def _on_tray_open(self) -> None:
         if self._window is not None:
-            self._window.show_window()
+            self._window.toggle_window()
 
     def _on_tray_refresh(self) -> None:
         self.refresh_usage()
@@ -247,6 +252,8 @@ class Application(Gtk.Application):
     # ------------------------------------------------------------------
 
     def on_quit(self) -> None:
+        if self._tray is not None:
+            self._tray.cleanup()
         if self.history_service is not None:
             self.history_service.flush_to_disk()
         self.quit()

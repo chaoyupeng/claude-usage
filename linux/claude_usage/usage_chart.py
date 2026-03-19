@@ -94,7 +94,7 @@ class UsageChart(Gtk.Box):
         # Drawing area
         self._canvas = Gtk.DrawingArea()
         self._canvas.set_content_width(340)
-        self._canvas.set_content_height(200)
+        self._canvas.set_content_height(140)
         self._canvas.set_hexpand(True)
         self._canvas.set_draw_func(self._draw)
 

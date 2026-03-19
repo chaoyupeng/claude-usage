@@ -34,7 +34,8 @@ fi
 BIN_DIR="$STAGING/usr/bin"
 mkdir -p "$BIN_DIR"
 cat > "$BIN_DIR/$PKG_NAME" << 'LAUNCHER'
-#!/usr/bin/env python3 -m claude_usage
+#!/bin/bash
+exec python3 -m claude_usage "$@"
 LAUNCHER
 
 # --- Desktop entry ---

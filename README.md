@@ -90,8 +90,9 @@ linux/                              # Linux system tray app (Python/GTK4)
 │   ├── usage_service.py            # OAuth, polling, API calls
 │   ├── log_service.py              # JSONL log file scanner
 │   ├── log_models.py               # Log parser and aggregation
-│   ├── tray_icon.py                # AppIndicator3 system tray
-│   ├── main_window.py              # GTK4 window with tabs
+│   ├── tray_icon.py                # AppIndicator3 system tray (GTK3 subprocess)
+│   ├── tray_proxy.py               # IPC proxy for GTK3↔GTK4 tray communication
+│   ├── main_window.py              # GTK4 dropdown window with tabs
 │   ├── usage_tab.py                # Usage tab UI
 │   ├── token_dashboard.py          # Tokens tab UI
 │   ├── usage_chart.py              # Cairo chart with interpolation
