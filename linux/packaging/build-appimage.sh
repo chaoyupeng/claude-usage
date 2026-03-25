@@ -39,24 +39,50 @@ if [ -d "$PROJECT_DIR/claude_usage/resources" ] && [ "$(ls -A "$PROJECT_DIR/clau
     cp -r "$PROJECT_DIR/claude_usage/resources/"* "$SITE_PKG/resources/"
 fi
 
-# --- AppRun ---
+# --- AppRun (auto-installs missing deps on first run) ---
 cat > "$APPDIR/AppRun" << 'APPRUN'
 #!/bin/bash
 set -e
 
 HERE="$(dirname "$(readlink -f "$0")")"
+DEPS="python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-ayatanaappindicator3-0.1 gir1.2-notify-0.7"
 
-# Check dependencies
+# Check which dependencies are missing
 missing=""
-python3 -c "import gi" 2>/dev/null || missing="$missing python3-gi"
-python3 -c "import gi; gi.require_version('Gtk', '4.0')" 2>/dev/null || missing="$missing gir1.2-gtk-4.0"
+for pkg in $DEPS; do
+    if ! dpkg -s "$pkg" &>/dev/null; then
+        missing="$missing $pkg"
+    fi
+done
 
+# Auto-install missing deps with a graphical prompt
 if [ -n "$missing" ]; then
-    echo "Missing system dependencies:$missing"
-    echo ""
-    echo "Install them with:"
-    echo "  sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-ayatanaappindicator3-0.1 gir1.2-notify-0.7"
-    exit 1
+    msg="Claude Usage needs to install system libraries (one-time setup):\n\n$missing\n\nInstall now?"
+
+    # Try graphical dialogs, fall back to terminal
+    confirmed=false
+    if command -v zenity &>/dev/null; then
+        zenity --question --title="Claude Usage — First Run" \
+            --text="$msg" --width=400 2>/dev/null && confirmed=true
+    elif command -v kdialog &>/dev/null; then
+        kdialog --yesno "$msg" --title "Claude Usage — First Run" 2>/dev/null && confirmed=true
+    else
+        echo -e "$msg"
+        read -rp "Install? [Y/n] " answer
+        [[ -z "$answer" || "$answer" =~ ^[Yy] ]] && confirmed=true
+    fi
+
+    if [ "$confirmed" = true ]; then
+        # Use pkexec for graphical sudo, fall back to sudo
+        if command -v pkexec &>/dev/null; then
+            pkexec apt-get install -y $missing
+        else
+            sudo apt-get install -y $missing
+        fi
+    else
+        echo "Cannot run without required libraries."
+        exit 1
+    fi
 fi
 
 export PYTHONPATH="$HERE/usr/lib/python3/dist-packages:${PYTHONPATH:-}"
