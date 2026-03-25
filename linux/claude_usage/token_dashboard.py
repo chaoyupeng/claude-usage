@@ -225,18 +225,14 @@ class TokenDashboard(Gtk.Box):
         self._app = app_controller
         self._last_scanned: Optional[datetime] = None
 
-        # Scrolled window
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.EXTERNAL)
-        scroll.set_vexpand(True)
-
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        # Direct content (no scroll — everything should fit)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         content.set_margin_start(12)
         content.set_margin_end(12)
-        content.set_margin_top(8)
-        content.set_margin_bottom(8)
-        scroll.set_child(content)
-        self.append(scroll)
+        content.set_margin_top(4)
+        content.set_margin_bottom(4)
+        content.set_vexpand(True)
+        self.append(content)
 
         # ------ Header grid: 4 stat cards ------
         stat_grid = Gtk.Grid()
@@ -259,7 +255,7 @@ class TokenDashboard(Gtk.Box):
         # ------ Token breakdown bar ------
         breakdown_label = Gtk.Label(label="Token Breakdown", xalign=0)
         breakdown_label.add_css_class("heading")
-        breakdown_label.set_margin_top(8)
+        breakdown_label.set_margin_top(4)
         content.append(breakdown_label)
 
         self._breakdown_bar = TokenBreakdownBar()
@@ -300,7 +296,7 @@ class TokenDashboard(Gtk.Box):
         # ------ Today section ------
         today_label = Gtk.Label(label="Today", xalign=0)
         today_label.add_css_class("heading")
-        today_label.set_margin_top(12)
+        today_label.set_margin_top(4)
         content.append(today_label)
 
         today_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
@@ -317,25 +313,25 @@ class TokenDashboard(Gtk.Box):
         # ------ Last hour chart ------
         hour_label = Gtk.Label(label="Last Hour", xalign=0)
         hour_label.add_css_class("heading")
-        hour_label.set_margin_top(12)
+        hour_label.set_margin_top(4)
         content.append(hour_label)
 
-        self._hour_chart = BarChart(bar_count=60, chart_height=80)
+        self._hour_chart = BarChart(bar_count=60, chart_height=60)
         content.append(self._hour_chart)
 
         # ------ 14-day trend ------
         trend_label = Gtk.Label(label="14-Day Trend", xalign=0)
         trend_label.add_css_class("heading")
-        trend_label.set_margin_top(12)
+        trend_label.set_margin_top(4)
         content.append(trend_label)
 
-        self._daily_chart = BarChart(bar_count=14, chart_height=80)
+        self._daily_chart = BarChart(bar_count=14, chart_height=60)
         content.append(self._daily_chart)
 
         # ------ Models section ------
         models_label = Gtk.Label(label="Models", xalign=0)
         models_label.add_css_class("heading")
-        models_label.set_margin_top(12)
+        models_label.set_margin_top(4)
         content.append(models_label)
 
         self._models_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -343,7 +339,7 @@ class TokenDashboard(Gtk.Box):
 
         # ------ Footer ------
         footer_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        footer_box.set_margin_top(12)
+        footer_box.set_margin_top(4)
 
         refresh_btn = Gtk.Button(label="Scan Logs")
         refresh_btn.add_css_class("flat")
