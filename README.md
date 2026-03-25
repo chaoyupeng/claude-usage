@@ -45,15 +45,30 @@ A menu bar / system tray app that shows your Claude usage at a glance — rate l
 3. **Right-click** the app → **Open** (don't double-click — macOS blocks unsigned apps on first launch)
 4. Click **Open** on the confirmation dialog — the app appears in the menu bar
 
-### Linux (Ubuntu/Debian)
+### Linux
+
+**AppImage (recommended):**
 
 ```sh
-# Download the .deb from the latest release, then:
+# Download the AppImage from the latest release, then:
+chmod +x Claude_Usage-1.2.0-x86_64.AppImage
+./Claude_Usage-1.2.0-x86_64.AppImage
+```
+
+System dependencies (install once):
+
+```sh
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-ayatanaappindicator3-0.1 gir1.2-notify-0.7
+```
+
+**Debian package:**
+
+```sh
 sudo apt install ./claude-usage_1.1.0_all.deb
 claude-usage
 ```
 
-Or build from source:
+**From source:**
 
 ```sh
 git clone https://github.com/chaoyupeng/claude-usage.git

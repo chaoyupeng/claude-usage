@@ -1,4 +1,4 @@
-.PHONY: run test deb clean
+.PHONY: run test deb appimage clean
 
 run:
 	python3 -m claude_usage
@@ -9,5 +9,8 @@ test:
 deb:
 	bash packaging/build-deb.sh
 
+appimage:
+	bash packaging/build-appimage.sh
+
 clean:
-	rm -rf build/ dist/ *.deb
+	rm -rf build/ dist/ *.deb *.AppImage
