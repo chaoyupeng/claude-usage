@@ -14,6 +14,11 @@ struct PopoverView: View {
     @AppStorage("setupComplete") private var setupComplete = false
     @State private var selectedTab: PopoverTab = .usage
 
+    /// Height held by the tab area regardless of which tab is showing, so the
+    /// popover never resizes. Sized to show the Usage tab comfortably; the
+    /// taller Tokens dashboard scrolls within it.
+    private static let tabContentHeight: CGFloat = 520
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if !setupComplete && !service.isAuthenticated {
@@ -44,6 +49,7 @@ struct PopoverView: View {
         }
         .padding()
         .frame(width: 340)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder
@@ -94,15 +100,33 @@ struct PopoverView: View {
         .pickerStyle(.segmented)
         .labelsHidden()
 
+        // The tab area is a fixed height, so the popover never changes size when
+        // switching tabs.
+        //
+        // menuBarExtraStyle(.window) grows its host panel to fit the tallest
+        // content it has shown and never shrinks back, which left the short
+        // Usage tab centred inside a tall panel. Resizing the panel to match the
+        // content does fix the layout, but the resize necessarily lands a frame
+        // after the content swaps and reads as a flash. Holding one height means
+        // there is nothing to resize and nothing to flash.
+        //
+        // The Usage tab is shorter than this and lets its chart grow to fill the
+        // slack; the Tokens dashboard is taller and scrolls.
         Group {
             switch selectedTab {
             case .usage:
-                usageTabContent
+                VStack(alignment: .leading, spacing: 10) {
+                    usageTabContent
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
             case .tokens:
-                TokenDashboardView(logService: logService)
+                ScrollView {
+                    TokenDashboardView(logService: logService)
+                }
+                .scrollIndicators(.hidden)
             }
         }
-        .animation(.easeInOut(duration: 0.15), value: selectedTab)
+        .frame(height: Self.tabContentHeight, alignment: .top)
 
         if let error = service.lastError {
             errorBanner(error)
@@ -478,3 +502,4 @@ private func colorForPct(_ pct: Double) -> Color {
     default: return .red
     }
 }
+

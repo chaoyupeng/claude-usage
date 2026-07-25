@@ -149,7 +149,9 @@ struct UsageChartView: View {
                 tooltipView(date: iv.date, pct5h: iv.pct5h, pct7d: iv.pct7d, pctSonnet7d: iv.pctSonnet7d)
             }
         }
-        .frame(height: 120)
+        // Grows to absorb whatever height the fixed-size tab area leaves over,
+        // so the Usage tab has no dead space below it.
+        .frame(minHeight: 120, maxHeight: .infinity)
         .padding(.top, 4)
     }
 
