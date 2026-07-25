@@ -28,7 +28,18 @@ let package = Package(
         .testTarget(
             name: "ClaudeUsageBarTests",
             dependencies: ["ClaudeUsageBar"],
-            path: "Tests/ClaudeUsageBarTests"
+            path: "Tests/ClaudeUsageBarTests",
+            linkerSettings: [
+                // The test bundle links Sparkle transitively, but without an
+                // rpath of its own dyld can't find the framework and the bundle
+                // fails to load — `swift test` dies before running a single
+                // test. From the bundle's binary at
+                // Foo.xctest/Contents/MacOS/Foo, three levels up is the build
+                // products directory where Sparkle.framework sits.
+                // (DYLD_FRAMEWORK_PATH is not a usable substitute: SIP strips
+                // DYLD_* when spawning Apple-signed test helpers.)
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@loader_path/../../.."])
+            ]
         )
     ]
 )
