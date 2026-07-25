@@ -452,6 +452,71 @@ final class ClaudeLogParserTests: XCTestCase {
         XCTAssertEqual(stats.modelBreakdown[0].messageCount, 1)
     }
 
+    // MARK: - Local-time bucketing
+    //
+    // Day and minute buckets must key off the user's local clock. Keying them in
+    // UTC rolls "Today" over mid-morning for UTC+10 users and shifts chart
+    // labels by a day — and by 30 minutes in half-hour-offset zones. These pass
+    // trivially in UTC, so CI runs the suite under several timezones.
+
+    private func record(at timestamp: Date, id: String) -> MessageRecord {
+        MessageRecord(
+            timestamp: timestamp,
+            model: "claude-opus-5",
+            sessionId: "s1",
+            usage: TokenUsage(input: 100),
+            messageId: id,
+            requestId: "r-\(id)"
+        )
+    }
+
+    func testAggregateTodayUsesLocalMidnight() {
+        // 01:00 local is the previous UTC day anywhere east of UTC, so a
+        // UTC-keyed "today" would exclude this record.
+        let calendar = Calendar.current
+        let now = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: Date())!
+        let earlyToday = calendar.date(bySettingHour: 1, minute: 0, second: 0, of: now)!
+        let stats = ClaudeLogParser.aggregate([record(at: earlyToday, id: "m1")], now: now)
+        XCTAssertEqual(stats.todayMessages, 1)
+        XCTAssertEqual(stats.todayUsage.input, 100)
+    }
+
+    func testAggregateExcludesYesterdayFromToday() {
+        let calendar = Calendar.current
+        let now = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: Date())!
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: now)!
+        let stats = ClaudeLogParser.aggregate([record(at: yesterday, id: "m1")], now: now)
+        XCTAssertEqual(stats.totalMessages, 1)
+        XCTAssertEqual(stats.todayMessages, 0)
+    }
+
+    func testAggregateDayKeyMatchesLocalDate() {
+        let calendar = Calendar.current
+        let now = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: Date())!
+        let stats = ClaudeLogParser.aggregate([record(at: now, id: "m1")], now: now)
+        let comps = calendar.dateComponents([.year, .month, .day], from: now)
+        let expectedKey = "\(comps.year!)-\(String(format: "%02d", comps.month!))-\(String(format: "%02d", comps.day!))"
+        let matching = stats.dailyBreakdown.filter { $0.date == expectedKey }
+        XCTAssertEqual(matching.count, 1)
+        XCTAssertEqual(matching.first?.messageCount, 1)
+    }
+
+    func testAggregateMinuteBucketUsesLocalClock() {
+        // In a half-hour-offset zone the minute-of-hour differs between UTC and
+        // local time, so a UTC-keyed bucket would land on the wrong minute.
+        let calendar = Calendar.current
+        let comps = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: Date())
+        let now = calendar.date(from: comps)!
+        let fiveMinutesAgo = now.addingTimeInterval(-300)
+        let stats = ClaudeLogParser.aggregate([record(at: fiveMinutesAgo, id: "m1")], now: now)
+        let nonZero = stats.lastHourMinutes.filter { $0.tokens > 0 }
+        XCTAssertEqual(nonZero.count, 1)
+        XCTAssertEqual(
+            calendar.component(.minute, from: nonZero[0].id),
+            calendar.component(.minute, from: fiveMinutesAgo)
+        )
+    }
+
     // MARK: - Cache write TTL split
 
     func testParseCacheCreationTTLBreakdown() {

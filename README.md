@@ -4,10 +4,9 @@
 
 # Claude Usage
 
-A menu bar / system tray app that shows your Claude usage at a glance — rate limits, token stats, and more. Available for **macOS** and **Linux**.
+A menu bar app that shows your Claude usage at a glance — rate limits, token stats, and more.
 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
-![Ubuntu 22.04+](https://img.shields.io/badge/Ubuntu-22.04%2B-E95420)
 ![License](https://img.shields.io/badge/license-BSD--2--Clause-green)
 
 ## Features
@@ -31,50 +30,23 @@ A menu bar / system tray app that shows your Claude usage at a glance — rate l
 - No authentication required — works offline
 
 ### General
-- Runs in the menu bar (macOS) or system tray (Linux)
-- Minimal dependencies
-- macOS: SwiftUI, Swift Charts, Sparkle
-- Linux: Python, GTK4, AppIndicator3
+- Runs in the menu bar
+- Minimal dependencies — SwiftUI, Swift Charts, Sparkle
 
 ## Install
 
-### macOS
+Download `ClaudeUsage.dmg` from the [latest release](https://github.com/chaoyupeng/claude-usage/releases/latest), then:
 
-1. Download `ClaudeUsage.dmg` from the [latest release](https://github.com/chaoyupeng/claude-usage/releases/latest)
-2. Open the disk image and drag `ClaudeUsage.app` into `Applications`
-3. **Right-click** the app → **Open** (don't double-click — macOS blocks unsigned apps on first launch)
-4. Click **Open** on the confirmation dialog — the app appears in the menu bar
-
-### Linux
-
-**AppImage (recommended):**
-
-```sh
-# Download the AppImage from the latest release, then:
-chmod +x Claude_Usage-1.2.0-x86_64.AppImage
-./Claude_Usage-1.2.0-x86_64.AppImage
-```
-
-System dependencies (install once):
-
-```sh
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-ayatanaappindicator3-0.1 gir1.2-notify-0.7
-```
-
-**Debian package:**
-
-```sh
-sudo apt install ./claude-usage_1.1.0_all.deb
-claude-usage
-```
+1. Open the disk image and drag `ClaudeUsage.app` into `Applications`
+2. **Right-click** the app → **Open** (don't double-click — macOS blocks unsigned apps on first launch)
+3. Click **Open** on the confirmation dialog — the app appears in the menu bar
 
 **From source:**
 
 ```sh
 git clone https://github.com/chaoyupeng/claude-usage.git
-cd claude-usage/linux
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-ayatanaappindicator3-0.1 gir1.2-notify-0.7
-python3 -m claude_usage
+cd claude-usage
+make app
 ```
 
 ## Usage
@@ -98,23 +70,6 @@ Token stats are read directly from `~/.claude/projects/` JSONL logs. No data is 
 ## Project structure
 
 ```
-linux/                              # Linux system tray app (Python/GTK4)
-├── claude_usage/
-│   ├── app.py                      # GTK application, service wiring
-│   ├── models.py                   # API response types
-│   ├── usage_service.py            # OAuth, polling, API calls
-│   ├── log_service.py              # JSONL log file scanner
-│   ├── log_models.py               # Log parser and aggregation
-│   ├── tray_icon.py                # AppIndicator3 system tray (GTK3 subprocess)
-│   ├── tray_proxy.py               # IPC proxy for GTK3↔GTK4 tray communication
-│   ├── main_window.py              # GTK4 dropdown window with tabs
-│   ├── usage_tab.py                # Usage tab UI
-│   ├── token_dashboard.py          # Tokens tab UI
-│   ├── usage_chart.py              # Cairo chart with interpolation
-│   └── ...
-├── packaging/                      # .deb packaging
-└── tests/
-
 macos/                              # macOS menu bar app (Swift/SwiftUI)
 ├── Sources/ClaudeUsageBar/
 │   ├── ClaudeUsageBarApp.swift      # App entry point, menu bar setup

@@ -24,32 +24,27 @@ jobs:
           xcode-select -p
           swift --version
 
+      # Day and minute bucketing is local-time based, so the suite runs across a
+      # whole-hour offset, a half-hour offset, a negative offset and UTC itself.
+      # A UTC-only run would pass even if the bucketing regressed to UTC keys.
       - name: Test
         working-directory: macos
         run: swift test
 
-  linux:
-    name: Linux (unittest)
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Day and minute bucketing is local-time based, so it is exercised
-        # across a whole-hour offset, a half-hour offset, a negative offset and
-        # UTC itself. A UTC-only run would pass even if the bucketing regressed
-        # back to UTC keys.
-        timezone: [UTC, Australia/Sydney, Australia/Adelaide, America/Los_Angeles]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      # The parser and its tests are pure stdlib — no PyGObject/GTK needed, so
-      # this job installs nothing.
-      - name: Test (TZ=${{ matrix.timezone }})
-        working-directory: linux
+      - name: Test (TZ=Australia/Sydney)
+        working-directory: macos
         env:
-          TZ: ${{ matrix.timezone }}
-        run: python3 -m unittest discover -s tests -v
+          TZ: Australia/Sydney
+        run: swift test
+
+      - name: Test (TZ=Australia/Adelaide)
+        working-directory: macos
+        env:
+          TZ: Australia/Adelaide
+        run: swift test
+
+      - name: Test (TZ=America/Los_Angeles)
+        working-directory: macos
+        env:
+          TZ: America/Los_Angeles
+        run: swift test

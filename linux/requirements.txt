@@ -1,2 +1,0 @@
-PyGObject>=3.42
-pycairo>=1.20
