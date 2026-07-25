@@ -12,6 +12,7 @@ struct PopoverView: View {
     @ObservedObject var appUpdater: AppUpdater
     @ObservedObject var logService: ClaudeLogService
     @ObservedObject var modelCatalog: ModelCatalogService
+    @ObservedObject var updateCheck: UpdateCheckService
     @AppStorage("setupComplete") private var setupComplete = false
     @State private var selectedTab: PopoverTab = .usage
 
@@ -227,11 +228,18 @@ struct PopoverView: View {
                     Task { await service.fetchUsage() }
                 }
             }
+            // Sparkle is only wired up if a feed URL is configured; the
+            // GitHub release check works regardless, so prefer whichever is
+            // actually available.
             if appUpdater.isConfigured {
                 footerButton(icon: "arrow.down.circle", label: "Update") {
                     appUpdater.checkForUpdates()
                 }
                 .disabled(!appUpdater.canCheckForUpdates)
+            } else if let update = updateCheck.availableUpdate {
+                footerButton(icon: "arrow.down.circle.fill", label: "Update \(update.version)") {
+                    updateCheck.presentPrompt(for: update)
+                }
             }
             quitButton
         }
