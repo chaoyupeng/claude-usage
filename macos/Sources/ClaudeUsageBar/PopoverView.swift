@@ -11,6 +11,7 @@ struct PopoverView: View {
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var appUpdater: AppUpdater
     @ObservedObject var logService: ClaudeLogService
+    @ObservedObject var modelCatalog: ModelCatalogService
     @AppStorage("setupComplete") private var setupComplete = false
     @State private var selectedTab: PopoverTab = .usage
 
@@ -112,16 +113,26 @@ struct PopoverView: View {
         //
         // The Usage tab is shorter than this and lets its chart grow to fill the
         // slack; the Tokens dashboard is taller and scrolls.
+        // Both branches scroll. The Usage tab normally fits, but with every
+        // optional section present (per-model rows, extra usage) at a large
+        // system text size it can exceed the fixed height — and a plain frame
+        // does not clip, so without a ScrollView the overflow would draw over
+        // the footer and be unreachable.
         Group {
             switch selectedTab {
             case .usage:
-                VStack(alignment: .leading, spacing: 10) {
-                    usageTabContent
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        usageTabContent
+                    }
+                    // Fills the viewport when the content is shorter than it, so
+                    // the chart can absorb the slack rather than leaving a gap.
+                    .frame(minHeight: Self.tabContentHeight, alignment: .top)
                 }
-                .frame(maxHeight: .infinity, alignment: .top)
+                .scrollIndicators(.hidden)
             case .tokens:
                 ScrollView {
-                    TokenDashboardView(logService: logService)
+                    TokenDashboardView(logService: logService, modelCatalog: modelCatalog)
                 }
                 .scrollIndicators(.hidden)
             }

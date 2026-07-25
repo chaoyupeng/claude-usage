@@ -113,8 +113,15 @@ struct AggregatedStats {
     /// Prorating `estimatedCost` by token share instead would assume every
     /// token cost the same, which is wrong whenever models are mixed.
     var todayCost: Double = 0.0
+    /// Models priced by a family guess rather than a published rate. Non-empty
+    /// means `estimatedCost` includes at least one guessed figure, which the UI
+    /// marks rather than presenting as fact.
+    var modelsWithoutPublishedRate: Set<String> = []
 
     var sessionCount: Int { sessionIds.count }
+
+    /// Whether any part of the cost estimate came from a guessed rate.
+    var costIncludesGuessedRate: Bool { !modelsWithoutPublishedRate.isEmpty }
 }
 
 // MARK: - Cost Estimation
@@ -128,8 +135,14 @@ enum CostEstimator {
     /// covers dated IDs like `claude-opus-4-20250514` without shadowing the
     /// longer `claude-opus-4-8`.
     ///
-    /// Long-context (1M) requests are standard-priced on Claude 4.6 and later,
-    /// so the `[1m]` model-ID suffix needs no special handling.
+    /// IDs are normalised first (see `normalizedModelID`), which strips provider
+    /// prefixes and the `[1m]` long-context suffix.
+    ///
+    /// Long-context requests are standard-priced on Claude 4.6 and later, so
+    /// dropping `[1m]` is exact for those. On the older Sonnet 4 / 4.5 1M beta a
+    /// long-context premium applied above 200K input tokens; that premium is not
+    /// modelled here, so those sessions are under-estimated. Deliberately not
+    /// guessed at — the rate is no longer published.
     private static let baseRates: [String: Rate] = [
         "claude-fable-5": (10.0, 50.0),
         "claude-mythos-5": (10.0, 50.0),
@@ -145,7 +158,10 @@ enum CostEstimator {
         "claude-sonnet-4-5": (3.0, 15.0),
         "claude-sonnet-4": (3.0, 15.0),
         "claude-haiku-4-5": (1.0, 5.0),
-        "claude-haiku-3-5": (0.80, 4.0),
+        // Pre-Claude-4 IDs put the generation before the family
+        // ("claude-3-5-haiku-20241022"), so they need their own keys — the
+        // family-first spelling above never matches them.
+        "claude-3-5-haiku": (0.80, 4.0),
     ]
 
     // Cache rates are fixed multiples of the model's input rate rather than
@@ -196,16 +212,44 @@ enum CostEstimator {
         return tokenCost * residency + searchCost
     }
 
+    /// Normalises a logged model ID for rate lookup.
+    ///
+    /// Bedrock and Vertex prefix the provider onto the ID
+    /// (`anthropic.claude-opus-4-1-20250805`, `us.anthropic.claude-...`), and
+    /// long-context variants suffix it (`claude-opus-5[1m]`). Prefix matching is
+    /// anchored, so without stripping both, a prefixed ID matches nothing and
+    /// silently falls through to a family guess.
+    static func normalizedModelID(_ model: String) -> String {
+        var id = model.lowercased()
+        if let claudeStart = id.range(of: "claude")?.lowerBound {
+            id = String(id[claudeStart...])
+        }
+        if let suffixStart = id.firstIndex(of: "[") {
+            id = String(id[..<suffixStart])
+        }
+        return id.trimmingCharacters(in: CharacterSet(charactersIn: "-_. "))
+    }
+
+    /// Whether this model's cost is based on a published rate rather than a
+    /// family guess. Callers surface the difference rather than presenting a
+    /// guess as fact.
+    static func hasPublishedRate(for model: String) -> Bool {
+        let id = normalizedModelID(model)
+        guard id != "<synthetic>" else { return true }
+        return baseEntry(for: id) != nil
+    }
+
     /// Resolves the rate in effect for this model at this point in time, or nil
     /// for entries that were never billed as API calls.
     private static func rate(for model: String, billing: BillingContext) -> Rate? {
-        let lowered = model.lowercased()
-
         // Claude Code logs `<synthetic>` for messages it generated locally.
-        guard lowered != "<synthetic>" else { return nil }
+        // Checked before normalising, which would strip the angle brackets.
+        guard model.lowercased() != "<synthetic>" else { return nil }
 
-        guard let (matchedKey, baseRate) = baseEntry(for: lowered) else {
-            return fallbackRate(for: lowered)
+        let id = normalizedModelID(model)
+
+        guard let (matchedKey, baseRate) = baseEntry(for: id) else {
+            return fallbackRate(for: id)
         }
 
         // Fast mode replaces the base rate outright where it is supported.
@@ -222,26 +266,29 @@ enum CostEstimator {
 
     /// Longest-prefix lookup, returning the matched key so callers can apply
     /// model-specific rules without re-deriving which model matched.
-    private static func baseEntry(for lowered: String) -> (key: String, rate: Rate)? {
-        if let exact = baseRates[lowered] { return (lowered, exact) }
+    private static func baseEntry(for normalizedID: String) -> (key: String, rate: Rate)? {
+        if let exact = baseRates[normalizedID] { return (normalizedID, exact) }
         guard let match = baseRates
-            .filter({ lowered.hasPrefix($0.key) })
+            .filter({ normalizedID.hasPrefix($0.key) })
             .max(by: { $0.key.count < $1.key.count })
         else { return nil }
         return (match.key, match.value)
     }
 
-    /// Tier guess for a model ID with no published rate — an unreleased model,
-    /// or one retired long enough to have been dropped from the pricing page
-    /// (Opus 3, Sonnet 3.x, Haiku 3, Claude 2.x). Assumes current-generation
-    /// pricing for the family; none of those models can appear in Claude Code
-    /// logs, so this is a forward-looking guess rather than a historical one.
-    private static func fallbackRate(for lowered: String) -> Rate {
-        if lowered.contains("fable") || lowered.contains("mythos") {
+    /// Last-resort tier guess for an ID with no published rate — a model newer
+    /// than this table, or one retired long enough to have been dropped from the
+    /// pricing page (Opus 3, Sonnet 3.x, Haiku 3).
+    ///
+    /// This is a guess, and for retired models it is known to be wrong: Opus 3
+    /// billed at $15/$75, not the $5/$25 the current Opus tier returns. Rather
+    /// than bake in rates that are no longer published, `hasPublishedRate`
+    /// reports when a guess was used so the UI can mark the total approximate.
+    private static func fallbackRate(for normalizedID: String) -> Rate {
+        if normalizedID.contains("fable") || normalizedID.contains("mythos") {
             return (10.0, 50.0)
-        } else if lowered.contains("opus") {
+        } else if normalizedID.contains("opus") {
             return (5.0, 25.0)
-        } else if lowered.contains("haiku") {
+        } else if normalizedID.contains("haiku") {
             return (1.0, 5.0)
         } else {
             return (3.0, 15.0)  // Sonnet tier

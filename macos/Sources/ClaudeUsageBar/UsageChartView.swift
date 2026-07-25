@@ -19,10 +19,13 @@ struct UsageChartView: View {
             let points = historyService.downsampledPoints(for: selectedRange)
 
             if points.isEmpty {
+                // Grows like the populated chart does, so the empty state also
+                // absorbs the slack in the popover's fixed-height tab area
+                // instead of leaving dead space below it.
                 Text("No history data yet.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
+                    .frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity, alignment: .center)
             } else {
                 chartView(points: points)
             }

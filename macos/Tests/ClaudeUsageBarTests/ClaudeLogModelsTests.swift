@@ -107,7 +107,9 @@ final class ClaudeLogModelsTests: XCTestCase {
             ("claude-sonnet-4-6", 3.0, 15.0),
             ("claude-sonnet-4-5", 3.0, 15.0),
             ("claude-haiku-4-5", 1.0, 5.0),
-            ("claude-haiku-3-5", 0.80, 4.0),
+            // Real Haiku 3.5 IDs are generation-first. Asserting on a
+            // family-first spelling would exercise a key no log can produce.
+            ("claude-3-5-haiku-20241022", 0.80, 4.0),
         ]
         for c in cases {
             let expected = c.input + c.output + c.input * 0.1 + c.input * 1.25
@@ -199,6 +201,76 @@ final class ClaudeLogModelsTests: XCTestCase {
     func testCostEstimatorZeroUsageReturnsZero() {
         let cost = CostEstimator.estimateCost(model: "claude-opus-4-8", usage: TokenUsage(), billing: postPromo)
         XCTAssertEqual(cost, 0.0)
+    }
+
+    // MARK: - Model ID normalisation
+    //
+    // Prefix matching is anchored, so anything wrapping the ID has to be
+    // stripped first or the lookup misses the table and silently guesses.
+
+    func testProviderPrefixedIDsResolveToPublishedRate() {
+        // Bedrock and Vertex prefix the provider onto the model ID. Opus 4.1
+        // bills at $15/$75; a family guess would return the current $5/$25.
+        let usage = TokenUsage(input: 1_000_000)
+        for model in [
+            "anthropic.claude-opus-4-1-20250805",
+            "us.anthropic.claude-opus-4-1-20250805",
+            "eu.anthropic.claude-opus-4-1",
+        ] {
+            XCTAssertEqual(
+                CostEstimator.estimateCost(model: model, usage: usage, billing: postPromo),
+                15.0, accuracy: 0.01, model
+            )
+            XCTAssertTrue(CostEstimator.hasPublishedRate(for: model), model)
+        }
+    }
+
+    func testProviderPrefixedIDStillGetsFastModePremium() {
+        // The guess path returns before the fast-mode check, so a prefixed ID
+        // used to lose the premium entirely.
+        let cost = CostEstimator.estimateCost(
+            model: "anthropic.claude-opus-5",
+            usage: inOut1M,
+            billing: billing(speed: "fast")
+        )
+        XCTAssertEqual(cost, 60.0, accuracy: 0.01)
+    }
+
+    func testProviderPrefixedIDStillGetsSonnet5Promo() {
+        let cost = CostEstimator.estimateCost(
+            model: "anthropic.claude-sonnet-5", usage: inOut1M, billing: billing()
+        )
+        XCTAssertEqual(cost, 12.0, accuracy: 0.01)
+    }
+
+    func testLegacyGenerationFirstHaikuIDResolves() {
+        // Real Haiku 3.5 IDs put the generation first: claude-3-5-haiku-*.
+        // The family-first spelling never matched them.
+        let usage = TokenUsage(input: 1_000_000)
+        XCTAssertEqual(
+            CostEstimator.estimateCost(model: "claude-3-5-haiku-20241022", usage: usage, billing: postPromo),
+            0.80, accuracy: 0.01
+        )
+        XCTAssertTrue(CostEstimator.hasPublishedRate(for: "claude-3-5-haiku-20241022"))
+    }
+
+    func testNormalizationStripsPrefixAndLongContextSuffix() {
+        XCTAssertEqual(CostEstimator.normalizedModelID("anthropic.claude-opus-5"), "claude-opus-5")
+        XCTAssertEqual(CostEstimator.normalizedModelID("claude-opus-5[1m]"), "claude-opus-5")
+        XCTAssertEqual(CostEstimator.normalizedModelID("us.anthropic.claude-opus-5[1m]"), "claude-opus-5")
+        XCTAssertEqual(CostEstimator.normalizedModelID("CLAUDE-OPUS-5"), "claude-opus-5")
+    }
+
+    func testRetiredModelIsReportedAsGuessed() {
+        // Opus 3's published rate is gone, so the family guess ($5/$25) is used
+        // and is known to be wrong ($15/$75). It must not read as authoritative.
+        XCTAssertFalse(CostEstimator.hasPublishedRate(for: "claude-3-opus-20240229"))
+        XCTAssertTrue(CostEstimator.hasPublishedRate(for: "claude-opus-4-8"))
+    }
+
+    func testSyntheticIsNotFlaggedAsGuessed() {
+        // Free rather than guessed — it was never a billed API call.
+        XCTAssertTrue(CostEstimator.hasPublishedRate(for: "<synthetic>"))
     }
 
     // MARK: - Sonnet 5 introductory pricing

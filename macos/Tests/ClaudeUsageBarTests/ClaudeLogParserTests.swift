@@ -452,6 +452,114 @@ final class ClaudeLogParserTests: XCTestCase {
         XCTAssertEqual(stats.modelBreakdown[0].messageCount, 1)
     }
 
+    // MARK: - Dedup: merging and key strength
+
+    func testDeduplicateMergesBillingModifiersAcrossCopies() {
+        // The search count sits on the first line while the larger token total
+        // sits on a later one; taking modifiers only from the winner loses it.
+        let jsonl = """
+        {"type":"assistant","requestId":"r","message":{"id":"m","model":"claude-opus-5","usage":{"input_tokens":2,"output_tokens":5,"server_tool_use":{"web_search_requests":3},"speed":"fast","inference_geo":"us"}},"timestamp":"2026-07-20T10:00:00.000Z","sessionId":"s1"}
+        {"type":"assistant","requestId":"r","message":{"id":"m","model":"claude-opus-5","usage":{"input_tokens":2,"output_tokens":300}},"timestamp":"2026-07-20T10:00:01.000Z","sessionId":"s1"}
+        """
+        let deduped = ClaudeLogParser.deduplicate(ClaudeLogParser.parseJSONLData(Data(jsonl.utf8)))
+        XCTAssertEqual(deduped.count, 1)
+        XCTAssertEqual(deduped[0].usage.output, 300)      // token counts from the complete row
+        XCTAssertEqual(deduped[0].webSearchRequests, 3)   // modifiers merged in
+        XCTAssertEqual(deduped[0].speed, "fast")
+        XCTAssertEqual(deduped[0].inferenceGeo, "us")
+    }
+
+    func testDeduplicateMergesModifiersRegardlessOfRowOrder() {
+        let jsonl = """
+        {"type":"assistant","requestId":"r","message":{"id":"m","model":"claude-opus-5","usage":{"input_tokens":2,"output_tokens":300}},"timestamp":"2026-07-20T10:00:00.000Z","sessionId":"s1"}
+        {"type":"assistant","requestId":"r","message":{"id":"m","model":"claude-opus-5","usage":{"input_tokens":2,"output_tokens":5,"server_tool_use":{"web_search_requests":3},"speed":"fast"}},"timestamp":"2026-07-20T10:00:01.000Z","sessionId":"s1"}
+        """
+        let deduped = ClaudeLogParser.deduplicate(ClaudeLogParser.parseJSONLData(Data(jsonl.utf8)))
+        XCTAssertEqual(deduped.count, 1)
+        XCTAssertEqual(deduped[0].usage.output, 300)
+        XCTAssertEqual(deduped[0].webSearchRequests, 3)
+        XCTAssertEqual(deduped[0].speed, "fast")
+    }
+
+    func testDeduplicateCollapsesCopiesDisagreeingOnRequestID() {
+        // A rewritten transcript can omit requestId. Keying on it would make
+        // these distinct and let both survive — the inflation dedup removes.
+        let jsonl = """
+        {"type":"assistant","requestId":"req_1","message":{"id":"msg_1","model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":20}},"timestamp":"2026-07-20T10:00:00.000Z","sessionId":"s1"}
+        {"type":"assistant","message":{"id":"msg_1","model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":20}},"timestamp":"2026-07-20T10:00:01.000Z","sessionId":"s2"}
+        """
+        let deduped = ClaudeLogParser.deduplicate(ClaudeLogParser.parseJSONLData(Data(jsonl.utf8)))
+        XCTAssertEqual(deduped.count, 1)
+        XCTAssertEqual(deduped[0].usage.total, 30)
+    }
+
+    func testAggregateCountsSessionsFromDuplicateRowsToo() {
+        // A resumed session's rows can all be duplicates of an earlier
+        // transcript's, so counting sessions post-dedup would lose it entirely.
+        let jsonl = """
+        {"type":"assistant","requestId":"r","message":{"id":"m","model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":20}},"timestamp":"2026-07-20T10:00:00.000Z","sessionId":"original"}
+        {"type":"assistant","requestId":"r","message":{"id":"m","model":"claude-opus-5","usage":{"input_tokens":10,"output_tokens":20}},"timestamp":"2026-07-20T10:00:01.000Z","sessionId":"resumed"}
+        """
+        let now = ClaudeLogParser.parseDate("2026-07-20T10:05:00.000Z")!
+        let stats = ClaudeLogParser.aggregate(ClaudeLogParser.parseJSONLData(Data(jsonl.utf8)), now: now)
+        XCTAssertEqual(stats.totalMessages, 1)   // one billed response
+        XCTAssertEqual(stats.sessionCount, 2)    // but two sessions touched it
+    }
+
+    // MARK: - Cache write recovered from the TTL breakdown
+
+    func testCacheWriteFallsBackToTTLBreakdown() {
+        // Only the nested breakdown is present. Clamping to the missing flat
+        // field would zero the write, and the record would then be dropped
+        // entirely by the total > 0 guard.
+        let jsonl = """
+        {"type":"assistant","requestId":"r","message":{"id":"m","model":"claude-opus-5","usage":{"cache_creation":{"ephemeral_5m_input_tokens":700,"ephemeral_1h_input_tokens":300}}},"timestamp":"2026-07-20T10:00:00.000Z","sessionId":"s1"}
+        """
+        let records = ClaudeLogParser.parseJSONLData(Data(jsonl.utf8))
+        XCTAssertEqual(records.count, 1, "record must not be dropped")
+        XCTAssertEqual(records[0].usage.cacheWrite, 1000)
+        XCTAssertEqual(records[0].usage.cacheWrite1h, 300)
+        XCTAssertEqual(records[0].usage.cacheWrite5m, 700)
+        XCTAssertEqual(records[0].usage.total, 1000)
+    }
+
+    func testFlatCacheWriteFieldStillWinsWhenLarger() {
+        let jsonl = """
+        {"type":"assistant","requestId":"r","message":{"id":"m","model":"claude-opus-5","usage":{"cache_creation_input_tokens":1000,"cache_creation":{"ephemeral_5m_input_tokens":700,"ephemeral_1h_input_tokens":300}}},"timestamp":"2026-07-20T10:00:00.000Z","sessionId":"s1"}
+        """
+        let records = ClaudeLogParser.parseJSONLData(Data(jsonl.utf8))
+        XCTAssertEqual(records[0].usage.cacheWrite, 1000)
+        XCTAssertEqual(records[0].usage.cacheWrite1h, 300)
+    }
+
+    // MARK: - Guessed-rate reporting
+
+    func testAggregateFlagsModelsPricedByGuess() {
+        let now = Date()
+        let records = [
+            MessageRecord(timestamp: now, model: "claude-opus-4-8", sessionId: "s1",
+                          usage: TokenUsage(input: 1_000), messageId: "m1"),
+            MessageRecord(timestamp: now, model: "claude-3-opus-20240229", sessionId: "s1",
+                          usage: TokenUsage(input: 1_000), messageId: "m2"),
+        ]
+        let stats = ClaudeLogParser.aggregate(records, now: now)
+        XCTAssertTrue(stats.costIncludesGuessedRate)
+        XCTAssertEqual(stats.modelsWithoutPublishedRate, ["claude-3-opus-20240229"])
+    }
+
+    func testAggregateDoesNotFlagFullyPricedHistory() {
+        let now = Date()
+        let records = [
+            MessageRecord(timestamp: now, model: "claude-opus-4-8", sessionId: "s1",
+                          usage: TokenUsage(input: 1_000), messageId: "m1"),
+            MessageRecord(timestamp: now, model: "<synthetic>", sessionId: "s1",
+                          usage: TokenUsage(input: 1_000), messageId: "m2"),
+        ]
+        let stats = ClaudeLogParser.aggregate(records, now: now)
+        XCTAssertFalse(stats.costIncludesGuessedRate)
+        XCTAssertTrue(stats.modelsWithoutPublishedRate.isEmpty)
+    }
+
     // MARK: - Local-time bucketing
     //
     // Day and minute buckets must key off the user's local clock. Keying them in

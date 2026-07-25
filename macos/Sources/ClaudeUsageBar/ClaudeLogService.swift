@@ -165,15 +165,22 @@ enum ClaudeLogParser {
             let input = usageDict["input_tokens"] as? Int ?? 0
             let output = usageDict["output_tokens"] as? Int ?? 0
             let cacheRead = usageDict["cache_read_input_tokens"] as? Int ?? 0
-            let cacheWrite = usageDict["cache_creation_input_tokens"] as? Int ?? 0
 
             // `cache_creation` breaks the write total down by TTL. A 1-hour
-            // write bills at 2x input vs 1.25x for 5-minute. Absent means all
+            // write bills at 2x input vs 1.25x for 5-minute; absent means all
             // writes are 5-minute.
             var cacheWrite1h = 0
+            var breakdownTotal = 0
             if let creation = usageDict["cache_creation"] as? [String: Any] {
                 cacheWrite1h = creation["ephemeral_1h_input_tokens"] as? Int ?? 0
+                breakdownTotal = cacheWrite1h + (creation["ephemeral_5m_input_tokens"] as? Int ?? 0)
             }
+
+            // Prefer the flat field, but fall back to the breakdown's sum if it
+            // is absent or smaller. Clamping to a missing flat field would zero
+            // the whole write — and a record whose only usage was cache writes
+            // would then be dropped by the `total > 0` guard below.
+            let cacheWrite = max(usageDict["cache_creation_input_tokens"] as? Int ?? 0, breakdownTotal)
 
             let usage = TokenUsage(
                 input: input, output: output,
@@ -214,11 +221,22 @@ enum ClaudeLogParser {
     /// `usage` object. Counting all of them inflates tokens, message counts and
     /// cost by however many blocks the response had.
     ///
-    /// Keyed on message ID + request ID, keeping the row with the largest total:
-    /// `output_tokens` grows across a response's lines while the input and cache
-    /// fields stay fixed, so the largest row is the complete one. Taking the max
-    /// rather than the last also makes this independent of file-walk order,
-    /// which is not guaranteed and can change between refreshes.
+    /// Keyed on `message.id`, which is already unique per API response. Request
+    /// ID is deliberately *not* part of the key: it is a top-level field that
+    /// defaults to empty when absent, so including it would split a response
+    /// whose copies disagree about it ("msg_1|req_1" vs "msg_1|") and let both
+    /// survive — reintroducing the inflation this pass exists to remove.
+    ///
+    /// The row with the largest total wins, because `output_tokens` grows across
+    /// a response's lines while the input and cache fields stay fixed. Taking
+    /// the max rather than the last also makes the result independent of
+    /// file-walk order, which is not guaranteed and can change between
+    /// refreshes.
+    ///
+    /// Billing modifiers are merged across every copy rather than taken from the
+    /// winning row alone: `speed`, `inferenceGeo` and `webSearchRequests` do not
+    /// necessarily appear on the row with the largest token total, and dropping
+    /// them silently loses real charges.
     ///
     /// Runs over records from *all* files, since a resumed session can spread
     /// one response's rows across two transcripts.
@@ -234,15 +252,28 @@ enum ClaudeLogParser {
                 unkeyed.append(record)
                 continue
             }
-            let key = "\(record.messageId)|\(record.requestId)"
-            if let existing = bestByKey[key] {
-                if record.usage.total > existing.usage.total {
-                    bestByKey[key] = record
-                }
-            } else {
+            let key = record.messageId
+            guard var merged = bestByKey[key] else {
                 bestByKey[key] = record
                 keyOrder.append(key)
+                continue
             }
+
+            // Token counts come from the most complete row.
+            if record.usage.total > merged.usage.total {
+                let carriedSpeed = merged.speed
+                let carriedGeo = merged.inferenceGeo
+                let carriedSearches = merged.webSearchRequests
+                merged = record
+                merged.speed = merged.speed ?? carriedSpeed
+                merged.inferenceGeo = merged.inferenceGeo ?? carriedGeo
+                merged.webSearchRequests = max(merged.webSearchRequests, carriedSearches)
+            } else {
+                merged.speed = merged.speed ?? record.speed
+                merged.inferenceGeo = merged.inferenceGeo ?? record.inferenceGeo
+                merged.webSearchRequests = max(merged.webSearchRequests, record.webSearchRequests)
+            }
+            bestByKey[key] = merged
         }
 
         return keyOrder.compactMap { bestByKey[$0] } + unkeyed
@@ -261,14 +292,23 @@ enum ClaudeLogParser {
         var dayMap: [String: (count: Int, usage: TokenUsage)] = [:]
         var minuteMap: [Date: Int] = [:]
 
+        // Sessions are counted from every parsed row, not just the deduplicated
+        // ones. A resumed session's rows can all be duplicates of an earlier
+        // transcript's, so counting post-dedup would drop the session entirely.
+        for record in records where !record.sessionId.isEmpty {
+            stats.sessionIds.insert(record.sessionId)
+        }
+
         for record in deduplicate(records) {
             let recordCost = CostEstimator.estimateCost(
                 model: record.model, usage: record.usage, billing: record.billing
             )
             stats.totalUsage += record.usage
             stats.totalMessages += 1
-            stats.sessionIds.insert(record.sessionId)
             stats.estimatedCost += recordCost
+            if !CostEstimator.hasPublishedRate(for: record.model) {
+                stats.modelsWithoutPublishedRate.insert(record.model)
+            }
 
             // Per-model
             var entry = modelMap[record.model] ?? (count: 0, usage: TokenUsage())

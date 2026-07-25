@@ -3,6 +3,7 @@ import Charts
 
 struct TokenDashboardView: View {
     @ObservedObject var logService: ClaudeLogService
+    @ObservedObject var modelCatalog: ModelCatalogService
 
     var body: some View {
         if logService.isLoading && logService.stats == nil {
@@ -109,7 +110,17 @@ struct TokenDashboardView: View {
             statCell(value: TokenFormatter.format(stats.totalUsage.total), label: "tokens", color: .primary)
             statCell(value: "\(stats.sessionCount)", label: "sessions", color: .blue)
             statCell(value: "\(stats.totalMessages)", label: "messages", color: .orange)
-            statCell(value: TokenFormatter.formatCost(stats.estimatedCost), label: "API est.", color: .green)
+            statCell(
+                value: stats.costIncludesGuessedRate
+                    ? "~\(TokenFormatter.formatCost(stats.estimatedCost))"
+                    : TokenFormatter.formatCost(stats.estimatedCost),
+                label: stats.costIncludesGuessedRate ? "API est.*" : "API est.",
+                color: .green
+            )
+            .help(stats.costIncludesGuessedRate
+                ? "Includes models with no published rate, priced by family: "
+                    + stats.modelsWithoutPublishedRate.sorted().joined(separator: ", ")
+                : "Estimated from published per-model rates.")
         }
     }
 
@@ -340,7 +351,9 @@ struct TokenDashboardView: View {
                 Circle()
                     .fill(modelColor(for: model.model))
                     .frame(width: 6, height: 6)
-                Text(model.model)
+                // Prefer the API's display name ("Claude Opus 4.8"); fall
+                // back to the raw logged ID when the catalog has no entry.
+                Text(modelCatalog.displayName(for: model.model) ?? model.model)
                     .font(.caption)
                 Spacer()
                 Text("\(TokenFormatter.format(model.usage.input)) in")
