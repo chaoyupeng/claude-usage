@@ -40,45 +40,264 @@ final class ClaudeLogModelsTests: XCTestCase {
         XCTAssertEqual(sum.total, 100)
     }
 
+    func testTokenUsageTotalExcludesOneHourWriteSubset() {
+        // cacheWrite1h is part of cacheWrite, not an additional bucket — adding
+        // it into `total` would double-count those tokens.
+        let usage = TokenUsage(input: 10, output: 20, cacheRead: 30, cacheWrite: 40, cacheWrite1h: 40)
+        XCTAssertEqual(usage.total, 100)
+    }
+
+    func testTokenUsageFiveMinuteWriteIsRemainder() {
+        let usage = TokenUsage(cacheWrite: 100, cacheWrite1h: 30)
+        XCTAssertEqual(usage.cacheWrite5m, 70)
+    }
+
+    func testTokenUsageFiveMinuteWriteNeverNegative() {
+        let usage = TokenUsage(cacheWrite: 10, cacheWrite1h: 40)
+        XCTAssertEqual(usage.cacheWrite5m, 0)
+    }
+
+    func testTokenUsageAdditionSumsOneHourWrites() {
+        let a = TokenUsage(cacheWrite: 100, cacheWrite1h: 40)
+        let b = TokenUsage(cacheWrite: 200, cacheWrite1h: 60)
+        let sum = a + b
+        XCTAssertEqual(sum.cacheWrite, 300)
+        XCTAssertEqual(sum.cacheWrite1h, 100)
+        XCTAssertEqual(sum.cacheWrite5m, 200)
+    }
+
     // MARK: - CostEstimator
 
-    func testCostEstimatorOpusPricing() {
-        let usage = TokenUsage(input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000)
-        let cost = CostEstimator.estimateCost(model: "claude-opus-4-6", usage: usage)
-        // input: $15, output: $75, cacheRead: $1.50, cacheWrite: $18.75
-        XCTAssertEqual(cost, 110.25, accuracy: 0.01)
+    // All-1M-tokens fixture: makes each rate directly readable off the total.
+    private let all1M = TokenUsage(
+        input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000
+    )
+
+    private func billing(
+        when iso: String = "2026-07-25T00:00:00Z",
+        speed: String? = nil,
+        geo: String? = nil,
+        searches: Int = 0
+    ) -> BillingContext {
+        BillingContext(
+            timestamp: ClaudeLogParser.parseDate(iso)!,
+            speed: speed,
+            inferenceGeo: geo,
+            webSearchRequests: searches
+        )
     }
 
-    func testCostEstimatorSonnetPricing() {
-        let usage = TokenUsage(input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000)
-        let cost = CostEstimator.estimateCost(model: "claude-sonnet-4-6", usage: usage)
-        // input: $3, output: $15, cacheRead: $0.30, cacheWrite: $3.75
-        XCTAssertEqual(cost, 22.05, accuracy: 0.01)
+    /// After the Sonnet 5 introductory window closes (2026-09-01).
+    private var postPromo: BillingContext { billing(when: "2026-09-15T00:00:00Z") }
+
+    func testCostEstimatorPublishedRates() {
+        // Every rate below is from the published pricing table. Cache read is
+        // 0.1x input and a 5-minute cache write 1.25x, so the all-1M fixture
+        // totals input + output + 0.1x + 1.25x.
+        let cases: [(model: String, input: Double, output: Double)] = [
+            ("claude-fable-5", 10.0, 50.0),
+            ("claude-mythos-5", 10.0, 50.0),
+            ("claude-opus-5", 5.0, 25.0),
+            ("claude-opus-4-8", 5.0, 25.0),
+            ("claude-opus-4-7", 5.0, 25.0),
+            ("claude-opus-4-6", 5.0, 25.0),
+            ("claude-opus-4-5", 5.0, 25.0),
+            ("claude-opus-4-1", 15.0, 75.0),
+            ("claude-opus-4-0", 15.0, 75.0),
+            ("claude-sonnet-4-6", 3.0, 15.0),
+            ("claude-sonnet-4-5", 3.0, 15.0),
+            ("claude-haiku-4-5", 1.0, 5.0),
+            ("claude-haiku-3-5", 0.80, 4.0),
+        ]
+        for c in cases {
+            let expected = c.input + c.output + c.input * 0.1 + c.input * 1.25
+            let actual = CostEstimator.estimateCost(model: c.model, usage: all1M, billing: postPromo)
+            XCTAssertEqual(actual, expected, accuracy: 0.01, c.model)
+        }
     }
 
-    func testCostEstimatorHaikuPricing() {
-        let usage = TokenUsage(input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000)
-        let cost = CostEstimator.estimateCost(model: "claude-haiku-4-5", usage: usage)
-        // input: $0.25, output: $1.25, cacheRead: $0.025, cacheWrite: $0.30
-        XCTAssertEqual(cost, 1.825, accuracy: 0.001)
+    func testCostEstimatorOpusFourPrefixDoesNotShadowLaterVersions() {
+        // "claude-opus-4" ($15/$75) is a prefix of "claude-opus-4-8" ($5/$25);
+        // longest-prefix matching must pick the more specific key.
+        let usage = TokenUsage(input: 1_000_000)
+        XCTAssertEqual(
+            CostEstimator.estimateCost(model: "claude-opus-4-8", usage: usage, billing: postPromo),
+            5.0, accuracy: 0.01
+        )
+        XCTAssertEqual(
+            CostEstimator.estimateCost(model: "claude-opus-4-20250514", usage: usage, billing: postPromo),
+            15.0, accuracy: 0.01
+        )
+    }
+
+    func testCostEstimatorOneHourCacheWriteCostsMoreThanFiveMinute() {
+        let write5m = TokenUsage(cacheWrite: 1_000_000, cacheWrite1h: 0)
+        let write1h = TokenUsage(cacheWrite: 1_000_000, cacheWrite1h: 1_000_000)
+        // Opus input is $5 → 5-min write 1.25x = $6.25, 1-hour write 2x = $10.
+        XCTAssertEqual(
+            CostEstimator.estimateCost(model: "claude-opus-5", usage: write5m, billing: postPromo),
+            6.25, accuracy: 0.01
+        )
+        XCTAssertEqual(
+            CostEstimator.estimateCost(model: "claude-opus-5", usage: write1h, billing: postPromo),
+            10.0, accuracy: 0.01
+        )
+    }
+
+    func testCostEstimatorSplitCacheWriteBillsBothRates() {
+        // 600K at the 5-min rate + 400K at the 1-hour rate.
+        let usage = TokenUsage(cacheWrite: 1_000_000, cacheWrite1h: 400_000)
+        let cost = CostEstimator.estimateCost(model: "claude-opus-5", usage: usage, billing: postPromo)
+        XCTAssertEqual(cost, 0.6 * 6.25 + 0.4 * 10.0, accuracy: 0.01)
+    }
+
+    func testCostEstimatorMissingTTLBreakdownTreatedAsFiveMinute() {
+        let usage = TokenUsage(cacheWrite: 1_000_000)
+        XCTAssertEqual(
+            CostEstimator.estimateCost(model: "claude-opus-5", usage: usage, billing: postPromo),
+            6.25, accuracy: 0.01
+        )
+    }
+
+    func testCostEstimatorDatedModelIDResolvesToBaseModel() {
+        let dated = CostEstimator.estimateCost(model: "claude-haiku-4-5-20251001", usage: all1M, billing: postPromo)
+        let base = CostEstimator.estimateCost(model: "claude-haiku-4-5", usage: all1M, billing: postPromo)
+        XCTAssertEqual(dated, base, accuracy: 0.001)
+    }
+
+    func testCostEstimatorLongContextSuffixResolvesToBaseModel() {
+        // 1M-context requests are standard-priced on Claude 4.6 and later.
+        let suffixed = CostEstimator.estimateCost(model: "claude-opus-5[1m]", usage: all1M, billing: postPromo)
+        let base = CostEstimator.estimateCost(model: "claude-opus-5", usage: all1M, billing: postPromo)
+        XCTAssertEqual(suffixed, base, accuracy: 0.001)
+    }
+
+    func testCostEstimatorSyntheticModelIsFree() {
+        // Claude Code logs `<synthetic>` for messages it generated locally.
+        XCTAssertEqual(CostEstimator.estimateCost(model: "<synthetic>", usage: all1M, billing: postPromo), 0.0)
     }
 
     func testCostEstimatorUnknownModelUsesSonnetPricing() {
-        let usage = TokenUsage(input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0)
-        let unknownCost = CostEstimator.estimateCost(model: "claude-4-ultra", usage: usage)
-        let sonnetCost = CostEstimator.estimateCost(model: "claude-sonnet-4-6", usage: usage)
-        XCTAssertEqual(unknownCost, sonnetCost)
+        let usage = TokenUsage(input: 1_000_000)
+        let unknownCost = CostEstimator.estimateCost(model: "claude-4-ultra", usage: usage, billing: postPromo)
+        let sonnetCost = CostEstimator.estimateCost(model: "claude-sonnet-4-6", usage: usage, billing: postPromo)
+        XCTAssertEqual(unknownCost, sonnetCost, accuracy: 0.001)
+    }
+
+    func testCostEstimatorUnknownOpusUsesOpusTier() {
+        let usage = TokenUsage(input: 1_000_000)
+        let cost = CostEstimator.estimateCost(model: "claude-opus-9-9", usage: usage, billing: postPromo)
+        XCTAssertEqual(cost, 5.0, accuracy: 0.01)
     }
 
     func testCostEstimatorCaseInsensitive() {
-        let usage = TokenUsage(input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0)
-        let cost = CostEstimator.estimateCost(model: "Claude-3-OPUS-20240229", usage: usage)
-        XCTAssertEqual(cost, 15.0, accuracy: 0.01)
+        let usage = TokenUsage(input: 1_000_000)
+        let cost = CostEstimator.estimateCost(model: "CLAUDE-OPUS-4-8", usage: usage, billing: postPromo)
+        XCTAssertEqual(cost, 5.0, accuracy: 0.01)
     }
 
     func testCostEstimatorZeroUsageReturnsZero() {
-        let cost = CostEstimator.estimateCost(model: "claude-opus-4-6", usage: TokenUsage())
+        let cost = CostEstimator.estimateCost(model: "claude-opus-4-8", usage: TokenUsage(), billing: postPromo)
         XCTAssertEqual(cost, 0.0)
+    }
+
+    // MARK: - Sonnet 5 introductory pricing
+    //
+    // Sonnet 5 bills $2/$10 through 2026-08-31, then $3/$15. Cost therefore
+    // depends on each message's own timestamp, not on today's date.
+
+    private let inOut1M = TokenUsage(input: 1_000_000, output: 1_000_000)
+
+    func testSonnet5PromoRateDuringWindow() {
+        let cost = CostEstimator.estimateCost(model: "claude-sonnet-5", usage: inOut1M, billing: billing())
+        XCTAssertEqual(cost, 12.0, accuracy: 0.01)
+    }
+
+    func testSonnet5StandardRateAfterWindow() {
+        let cost = CostEstimator.estimateCost(model: "claude-sonnet-5", usage: inOut1M, billing: postPromo)
+        XCTAssertEqual(cost, 18.0, accuracy: 0.01)
+    }
+
+    func testSonnet5PromoBoundary() {
+        let last = billing(when: "2026-08-31T23:59:59Z")
+        let first = billing(when: "2026-09-01T00:00:00Z")
+        XCTAssertEqual(CostEstimator.estimateCost(model: "claude-sonnet-5", usage: inOut1M, billing: last), 12.0, accuracy: 0.01)
+        XCTAssertEqual(CostEstimator.estimateCost(model: "claude-sonnet-5", usage: inOut1M, billing: first), 18.0, accuracy: 0.01)
+    }
+
+    func testSonnet5PromoCacheRatesScaleWithPromoInputRate() {
+        // $2 input → read $0.20, 5-min write $2.50, 1-hour write $4.
+        let usage = TokenUsage(cacheRead: 1_000_000, cacheWrite: 1_000_000, cacheWrite1h: 500_000)
+        let cost = CostEstimator.estimateCost(model: "claude-sonnet-5", usage: usage, billing: billing())
+        XCTAssertEqual(cost, 0.20 + 0.5 * 2.50 + 0.5 * 4.0, accuracy: 0.01)
+    }
+
+    func testSonnet5PromoDoesNotAffectOtherModels() {
+        let during = CostEstimator.estimateCost(model: "claude-sonnet-4-6", usage: inOut1M, billing: billing())
+        let after = CostEstimator.estimateCost(model: "claude-sonnet-4-6", usage: inOut1M, billing: postPromo)
+        XCTAssertEqual(during, after, accuracy: 0.001)
+        XCTAssertEqual(during, 18.0, accuracy: 0.01)
+    }
+
+    // MARK: - Fast mode, data residency, web search
+
+    func testFastModePremiumOnSupportedModels() {
+        for model in ["claude-opus-5", "claude-opus-4-8"] {
+            let standard = CostEstimator.estimateCost(model: model, usage: inOut1M, billing: billing(speed: "standard"))
+            let fast = CostEstimator.estimateCost(model: model, usage: inOut1M, billing: billing(speed: "fast"))
+            XCTAssertEqual(standard, 30.0, accuracy: 0.01, model)  // $5 + $25
+            XCTAssertEqual(fast, 60.0, accuracy: 0.01, model)      // $10 + $50
+        }
+    }
+
+    func testFastModeIgnoredOnUnsupportedModels() {
+        // Fast mode is not offered on Opus 4.7 or Sonnet, so a stray "fast"
+        // must not inflate their cost.
+        for model in ["claude-opus-4-7", "claude-sonnet-4-6"] {
+            let fast = CostEstimator.estimateCost(model: model, usage: inOut1M, billing: billing(speed: "fast"))
+            let standard = CostEstimator.estimateCost(model: model, usage: inOut1M, billing: billing(speed: "standard"))
+            XCTAssertEqual(fast, standard, accuracy: 0.001, model)
+        }
+    }
+
+    func testMissingSpeedIsStandard() {
+        let cost = CostEstimator.estimateCost(model: "claude-opus-5", usage: inOut1M, billing: billing(speed: nil))
+        XCTAssertEqual(cost, 30.0, accuracy: 0.01)
+    }
+
+    func testUSDataResidencyMultiplier() {
+        let base = CostEstimator.estimateCost(model: "claude-opus-5", usage: inOut1M, billing: billing())
+        let us = CostEstimator.estimateCost(model: "claude-opus-5", usage: inOut1M, billing: billing(geo: "us"))
+        XCTAssertEqual(us, base * 1.1, accuracy: 0.001)
+    }
+
+    func testNonUSGeoIsStandardPriced() {
+        let base = CostEstimator.estimateCost(model: "claude-opus-5", usage: inOut1M, billing: billing())
+        for geo in ["global", "not_available"] {
+            let cost = CostEstimator.estimateCost(model: "claude-opus-5", usage: inOut1M, billing: billing(geo: geo))
+            XCTAssertEqual(cost, base, accuracy: 0.001, geo)
+        }
+        let none = CostEstimator.estimateCost(model: "claude-opus-5", usage: inOut1M, billing: billing(geo: nil))
+        XCTAssertEqual(none, base, accuracy: 0.001)
+    }
+
+    func testWebSearchBilledPerSearch() {
+        // $10 per 1,000 searches.
+        let base = CostEstimator.estimateCost(model: "claude-opus-5", usage: inOut1M, billing: billing())
+        let withSearches = CostEstimator.estimateCost(model: "claude-opus-5", usage: inOut1M, billing: billing(searches: 25))
+        XCTAssertEqual(withSearches - base, 0.25, accuracy: 0.0001)
+    }
+
+    func testSearchChargesNotScaledByDataResidency() {
+        // The 1.1x multiplier applies to token categories, not per-search fees.
+        let tokensOnly = CostEstimator.estimateCost(model: "claude-opus-5", usage: inOut1M, billing: billing(geo: "us"))
+        let withSearch = CostEstimator.estimateCost(model: "claude-opus-5", usage: inOut1M, billing: billing(geo: "us", searches: 10))
+        XCTAssertEqual(withSearch - tokensOnly, 0.10, accuracy: 0.0001)
+    }
+
+    func testFastModeAndResidencyStack() {
+        let cost = CostEstimator.estimateCost(model: "claude-opus-5", usage: inOut1M, billing: billing(speed: "fast", geo: "us"))
+        XCTAssertEqual(cost, 60.0 * 1.1, accuracy: 0.01)
     }
 
     // MARK: - TokenFormatter

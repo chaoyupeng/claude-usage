@@ -180,7 +180,7 @@ struct TokenDashboardView: View {
             Text("Today")
                 .font(.subheadline.bold())
             Spacer()
-            Text("~\(TokenFormatter.formatCost(todayCost(stats))) est.")
+            Text("~\(TokenFormatter.formatCost(stats.todayCost)) est.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -200,11 +200,6 @@ struct TokenDashboardView: View {
         }
 
         tokenBreakdownBar(stats.todayUsage)
-    }
-
-    private func todayCost(_ stats: AggregatedStats) -> Double {
-        guard stats.totalUsage.total > 0 else { return 0 }
-        return stats.estimatedCost * Double(stats.todayUsage.total) / Double(stats.totalUsage.total)
     }
 
     // MARK: - Last Hour Chart

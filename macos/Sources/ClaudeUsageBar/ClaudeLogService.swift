@@ -167,22 +167,85 @@ enum ClaudeLogParser {
             let cacheRead = usageDict["cache_read_input_tokens"] as? Int ?? 0
             let cacheWrite = usageDict["cache_creation_input_tokens"] as? Int ?? 0
 
+            // `cache_creation` breaks the write total down by TTL. A 1-hour
+            // write bills at 2x input vs 1.25x for 5-minute. Absent means all
+            // writes are 5-minute.
+            var cacheWrite1h = 0
+            if let creation = usageDict["cache_creation"] as? [String: Any] {
+                cacheWrite1h = creation["ephemeral_1h_input_tokens"] as? Int ?? 0
+            }
+
             let usage = TokenUsage(
                 input: input, output: output,
-                cacheRead: cacheRead, cacheWrite: cacheWrite
+                cacheRead: cacheRead, cacheWrite: cacheWrite,
+                cacheWrite1h: min(cacheWrite1h, cacheWrite)
             )
 
             guard usage.total > 0 else { continue }
+
+            // Billable modifiers recorded alongside the token counts.
+            var webSearches = 0
+            if let serverTools = usageDict["server_tool_use"] as? [String: Any] {
+                webSearches = serverTools["web_search_requests"] as? Int ?? 0
+            }
 
             records.append(MessageRecord(
                 timestamp: timestamp,
                 model: model,
                 sessionId: sessionId,
-                usage: usage
+                usage: usage,
+                messageId: message["id"] as? String ?? "",
+                requestId: json["requestId"] as? String ?? "",
+                speed: usageDict["speed"] as? String,
+                inferenceGeo: usageDict["inference_geo"] as? String,
+                webSearchRequests: webSearches
             ))
         }
 
         return records
+    }
+
+    // MARK: - Deduplication
+
+    /// Collapses the repeated rows Claude Code writes for a single API response.
+    ///
+    /// One assistant response is logged as several JSONL lines — one per content
+    /// block (thinking, then each tool_use) — and every line repeats the same
+    /// `usage` object. Counting all of them inflates tokens, message counts and
+    /// cost by however many blocks the response had.
+    ///
+    /// Keyed on message ID + request ID, keeping the row with the largest total:
+    /// `output_tokens` grows across a response's lines while the input and cache
+    /// fields stay fixed, so the largest row is the complete one. Taking the max
+    /// rather than the last also makes this independent of file-walk order,
+    /// which is not guaranteed and can change between refreshes.
+    ///
+    /// Runs over records from *all* files, since a resumed session can spread
+    /// one response's rows across two transcripts.
+    static func deduplicate(_ records: [MessageRecord]) -> [MessageRecord] {
+        var bestByKey: [String: MessageRecord] = [:]
+        var keyOrder: [String] = []
+        var unkeyed: [MessageRecord] = []
+
+        for record in records {
+            // Without a message ID there is nothing safe to group on — keep the
+            // row as-is rather than risk collapsing distinct responses.
+            guard !record.messageId.isEmpty else {
+                unkeyed.append(record)
+                continue
+            }
+            let key = "\(record.messageId)|\(record.requestId)"
+            if let existing = bestByKey[key] {
+                if record.usage.total > existing.usage.total {
+                    bestByKey[key] = record
+                }
+            } else {
+                bestByKey[key] = record
+                keyOrder.append(key)
+            }
+        }
+
+        return keyOrder.compactMap { bestByKey[$0] } + unkeyed
     }
 
     // MARK: - Aggregation
@@ -198,13 +261,14 @@ enum ClaudeLogParser {
         var dayMap: [String: (count: Int, usage: TokenUsage)] = [:]
         var minuteMap: [Date: Int] = [:]
 
-        for record in records {
+        for record in deduplicate(records) {
+            let recordCost = CostEstimator.estimateCost(
+                model: record.model, usage: record.usage, billing: record.billing
+            )
             stats.totalUsage += record.usage
             stats.totalMessages += 1
             stats.sessionIds.insert(record.sessionId)
-            stats.estimatedCost += CostEstimator.estimateCost(
-                model: record.model, usage: record.usage
-            )
+            stats.estimatedCost += recordCost
 
             // Per-model
             var entry = modelMap[record.model] ?? (count: 0, usage: TokenUsage())
@@ -224,6 +288,7 @@ enum ClaudeLogParser {
             if record.timestamp >= todayStart {
                 stats.todayUsage += record.usage
                 stats.todayMessages += 1
+                stats.todayCost += recordCost
             }
 
             // Last hour (per-minute buckets)
