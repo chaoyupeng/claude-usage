@@ -7,6 +7,7 @@ struct ClaudeUsageBarApp: App {
     @StateObject private var notificationService = NotificationService()
     @StateObject private var appUpdater = AppUpdater()
     @StateObject private var logService = ClaudeLogService()
+    @StateObject private var modelCatalog = ModelCatalogService()
 
     var body: some Scene {
         MenuBarExtra {
@@ -15,7 +16,8 @@ struct ClaudeUsageBarApp: App {
                 historyService: historyService,
                 notificationService: notificationService,
                 appUpdater: appUpdater,
-                logService: logService
+                logService: logService,
+                modelCatalog: modelCatalog
             )
         } label: {
             Image(nsImage: service.isAuthenticated
@@ -32,6 +34,7 @@ struct ClaudeUsageBarApp: App {
                     service.notificationService = notificationService
                     service.startPolling()
                     logService.refresh()
+                    modelCatalog.refreshIfStale()
                 }
         }
         .menuBarExtraStyle(.window)
