@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal
 from typing import List, Set
 
 
@@ -152,8 +153,17 @@ class TokenFormatter:
 
     @staticmethod
     def format_cost(amount: float) -> str:
+        # Python's format spec rounds halves to even, so ".0f" renders 2100.5 as
+        # "$2100". Money conventionally rounds halves up, so round to the
+        # displayed precision first and format an already-rounded value.
         if amount >= 1000:
-            return f"${amount:.0f}"
+            return f"${TokenFormatter._round_half_up(amount, 0):.0f}"
         elif amount >= 100:
-            return f"${amount:.1f}"
-        return f"${amount:.2f}"
+            return f"${TokenFormatter._round_half_up(amount, 1):.1f}"
+        return f"${TokenFormatter._round_half_up(amount, 2):.2f}"
+
+    @staticmethod
+    def _round_half_up(value: float, places: int) -> float:
+        """Round to `places` decimals, breaking ties away from zero."""
+        quantum = Decimal(1).scaleb(-places)
+        return float(Decimal(value).quantize(quantum, rounding=ROUND_HALF_UP))

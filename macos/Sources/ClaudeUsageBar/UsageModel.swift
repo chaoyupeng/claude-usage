@@ -148,6 +148,11 @@ struct ExtraUsage: Codable {
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = "USD"
+        // Pin the locale: without it the formatter follows the user's region,
+        // which disambiguates USD as "USD 52.30" anywhere "$" means a local
+        // dollar (en_AU, en_CA, …). Amounts are always USD, so render them the
+        // same way everywhere.
+        f.locale = Locale(identifier: "en_US")
         f.maximumFractionDigits = 2
         f.minimumFractionDigits = 2
         return f

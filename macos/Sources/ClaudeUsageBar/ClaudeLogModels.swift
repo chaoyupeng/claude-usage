@@ -127,11 +127,20 @@ enum TokenFormatter {
     }
 
     static func formatCost(_ amount: Double) -> String {
+        // printf rounds halves to even, so "$%.0f" renders 2100.5 as "$2100".
+        // Money conventionally rounds halves up, so round to the displayed
+        // precision first and hand printf an already-rounded value.
         if amount >= 1000 {
-            return String(format: "$%.0f", amount)
+            return String(format: "$%.0f", roundedHalfUp(amount, places: 0))
         } else if amount >= 100 {
-            return String(format: "$%.1f", amount)
+            return String(format: "$%.1f", roundedHalfUp(amount, places: 1))
         }
-        return String(format: "$%.2f", amount)
+        return String(format: "$%.2f", roundedHalfUp(amount, places: 2))
+    }
+
+    /// Rounds to `places` decimals, breaking ties away from zero.
+    private static func roundedHalfUp(_ value: Double, places: Int) -> Double {
+        let factor = pow(10.0, Double(places))
+        return (value * factor).rounded() / factor
     }
 }
