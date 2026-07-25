@@ -31,6 +31,7 @@ A menu bar app that shows your Claude usage at a glance — rate limits, token s
 
 ### General
 - Runs in the menu bar
+- Checks once a day for a new release and offers the download page
 - Minimal dependencies — SwiftUI, Swift Charts, Sparkle
 
 ## Install
@@ -88,7 +89,18 @@ All data is stored locally in `~/.config/claude-usage-bar/`:
 | `credentials.json` | OAuth credentials (permissions: `0600`) |
 | `history.json` | Usage history for the chart (30-day retention) |
 
-Token stats are read directly from `~/.claude/projects/` JSONL logs. No data is sent anywhere other than the Anthropic API.
+Token stats are read directly from `~/.claude/projects/` JSONL logs.
+
+The app makes exactly two kinds of outbound request, and neither sends anything
+about you or your usage:
+
+| Request | Purpose |
+|---|---|
+| Anthropic API | Your usage figures and the model list, authorised by your own OAuth sign-in |
+| GitHub releases API | A once-a-day check for a newer version — an unauthenticated `GET`, no request body |
+
+Nothing else leaves your machine. Token and cost figures are computed locally
+from your logs and are never uploaded.
 
 ## Project structure
 
