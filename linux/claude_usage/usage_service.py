@@ -39,7 +39,7 @@ _REDIRECT_URI = "https://platform.claude.com/oauth/code/callback"
 _DEFAULT_SCOPES = ["user:profile", "user:inference"]
 _BETA_HEADER = "oauth-2025-04-20"
 _MAX_BACKOFF_INTERVAL = 3600.0  # 1 hour
-_USER_AGENT = "ClaudeUsage/1.1.0"
+_USER_AGENT = "ClaudeUsage/1.2.1"
 
 
 # ---------------------------------------------------------------------------

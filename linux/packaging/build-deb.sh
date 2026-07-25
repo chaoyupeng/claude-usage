@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PKG_NAME="claude-usage"
-VERSION="1.1.0"
+VERSION="1.2.1"
 ARCH="all"
 DEB_NAME="${PKG_NAME}_${VERSION}_${ARCH}"
 

@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PKG_NAME="Claude_Usage"
-VERSION="1.2.0"
+VERSION="1.2.1"
 ARCH="x86_64"
 
 # Require appimagetool
