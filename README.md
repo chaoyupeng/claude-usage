@@ -35,18 +35,41 @@ A menu bar app that shows your Claude usage at a glance — rate limits, token s
 
 ## Install
 
-Download `ClaudeUsage.dmg` from the [latest release](https://github.com/chaoyupeng/claude-usage/releases/latest), then:
+The app is **not notarised by Apple**, so macOS blocks it on first launch. This
+is expected — notarisation requires a paid Apple Developer account. Pick
+whichever route below suits you; both are one-time.
 
-1. Open the disk image and drag `ClaudeUsage.app` into `Applications`
-2. **Right-click** the app → **Open** (don't double-click — macOS blocks unsigned apps on first launch)
-3. Click **Open** on the confirmation dialog — the app appears in the menu bar
+Download `ClaudeUsage.dmg` from the
+[latest release](https://github.com/chaoyupeng/claude-usage/releases/latest) and
+drag `ClaudeUsage.app` into `Applications`. Then:
 
-**From source:**
+**Route 1 — no Terminal.** Double-click the app. macOS shows
+*"Apple could not verify … is free of malware"* with only **Done** and
+**Move to Bin** — click **Done**, then open **System Settings → Privacy &
+Security**, scroll to the bottom, and click **Open Anyway** next to the message
+about `ClaudeUsageBar`. Confirm, and it launches.
+
+**Route 2 — one command.** Clear the quarantine flag, then open it normally:
+
+```sh
+xattr -d com.apple.quarantine /Applications/ClaudeUsageBar.app
+```
+
+> Use `-d`, not `-dr`. The recursive form fails with *Operation not permitted* on
+> recent macOS, because it tries to modify files inside the signed bundle.
+
+On older macOS (14 and earlier) right-click → **Open** also worked. It no longer
+does: the current dialog has no bypass button, which is why the two routes above
+exist.
+
+**From source** — a locally built app is never quarantined, so there is no
+warning at all:
 
 ```sh
 git clone https://github.com/chaoyupeng/claude-usage.git
 cd claude-usage
-make app
+make app          # builds macos/ClaudeUsageBar.app
+make install      # copies it to /Applications
 ```
 
 ## Usage
