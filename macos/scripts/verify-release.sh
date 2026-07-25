@@ -31,9 +31,24 @@ verify_app_bundle() {
     echo "==> Verifying packaged resources..."
     [[ -f "$app_plist" ]] || { echo "Error: missing Info.plist"; exit 1; }
     [[ -d "$resource_bundle" ]] || { echo "Error: missing SwiftPM resource bundle"; exit 1; }
-    [[ -f "$resource_bundle/Info.plist" ]] || { echo "Error: missing resource bundle Info.plist"; exit 1; }
-    [[ -f "$resource_bundle/claude-logo.png" ]] || { echo "Error: missing packaged logo resource"; exit 1; }
-    [[ -f "$resource_bundle/en.lproj/Localizable.strings" ]] || { echo "Error: missing packaged localization resource"; exit 1; }
+
+    # SwiftPM emits the resource bundle flat on some toolchains and in the
+    # macOS Contents/ form on others (Xcode 27 switched to the latter).
+    # Foundation's Bundle(url:) reads either, so accept both rather than
+    # failing the release on a layout difference.
+    local bundle_root="$resource_bundle"
+    if [[ -f "$resource_bundle/Contents/Info.plist" ]]; then
+        bundle_root="$resource_bundle/Contents"
+        echo "    resource bundle layout: Contents/"
+    else
+        echo "    resource bundle layout: flat"
+    fi
+    local bundle_resources="$bundle_root"
+    [[ -d "$bundle_root/Resources" ]] && bundle_resources="$bundle_root/Resources"
+
+    [[ -f "$bundle_root/Info.plist" ]] || { echo "Error: missing resource bundle Info.plist"; exit 1; }
+    [[ -f "$bundle_resources/claude-logo.png" ]] || { echo "Error: missing packaged logo resource"; exit 1; }
+    [[ -f "$bundle_resources/en.lproj/Localizable.strings" ]] || { echo "Error: missing packaged localization resource"; exit 1; }
     [[ -d "$sparkle_framework" ]] || { echo "Error: missing Sparkle.framework"; exit 1; }
 
     echo "==> Verifying app signature..."
