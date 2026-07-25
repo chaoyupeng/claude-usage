@@ -1,7 +1,20 @@
 import SwiftUI
+import AppKit
+
+/// Stands down at launch if another copy of the app is already running, so a
+/// build run from the repo does not add a second menu bar icon beside the copy
+/// in /Applications. See `SingleInstanceGuard`.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        if SingleInstanceGuard.yieldToExistingInstance() {
+            NSApp.terminate(nil)
+        }
+    }
+}
 
 @main
 struct ClaudeUsageBarApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var service = UsageService()
     @StateObject private var historyService = UsageHistoryService()
     @StateObject private var notificationService = NotificationService()
