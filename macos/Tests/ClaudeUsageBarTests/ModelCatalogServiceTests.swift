@@ -85,12 +85,39 @@ final class ModelCatalogServiceTests: XCTestCase {
         XCTAssertNil(catalog.displayName(for: "claude-something-unreleased"))
     }
 
-    func testDatedIDDoesNotMatchBareCatalogEntry() throws {
-        // Documents a real limitation: the catalog is keyed on exact IDs, so a
-        // dated ID has no entry and the UI shows the raw string. Pricing still
-        // resolves it via prefix matching — only the display name is affected.
+    func testDatedIDResolvesToItsBaseCatalogEntry() throws {
+        // Dated IDs extend a catalog entry rather than matching it. Without a
+        // prefix fallback the UI would show the raw string for the canonical
+        // Haiku 4.5 ID, which is dated.
         try writeCache([CatalogModel(id: "claude-haiku-4-5", displayName: "Claude Haiku 4.5")])
         let catalog = service()
-        XCTAssertNil(catalog.displayName(for: "claude-haiku-4-5-20251001"))
+        XCTAssertEqual(catalog.displayName(for: "claude-haiku-4-5-20251001"), "Claude Haiku 4.5")
+    }
+
+    func testPrefixFallbackPrefersTheMostSpecificEntry() throws {
+        // A shorter key must not shadow a longer one that also matches.
+        try writeCache([
+            CatalogModel(id: "claude-opus-4", displayName: "Claude Opus 4"),
+            CatalogModel(id: "claude-opus-4-8", displayName: "Claude Opus 4.8"),
+        ])
+        let catalog = service()
+        XCTAssertEqual(catalog.displayName(for: "claude-opus-4-8-20260101"), "Claude Opus 4.8")
+        XCTAssertEqual(catalog.displayName(for: "claude-opus-4-20250514"), "Claude Opus 4")
+    }
+
+    func testPrefixFallbackCombinesWithPrefixAndSuffixStripping() throws {
+        try writeCache([CatalogModel(id: "claude-haiku-4-5", displayName: "Claude Haiku 4.5")])
+        let catalog = service()
+        XCTAssertEqual(
+            catalog.displayName(for: "us.anthropic.claude-haiku-4-5-20251001[1m]"),
+            "Claude Haiku 4.5"
+        )
+    }
+
+    func testUnrelatedIDStillFallsBackToNil() throws {
+        // The prefix fallback must not turn an unrelated ID into a wrong name.
+        try writeCache([CatalogModel(id: "claude-haiku-4-5", displayName: "Claude Haiku 4.5")])
+        let catalog = service()
+        XCTAssertNil(catalog.displayName(for: "claude-opus-5"))
     }
 }

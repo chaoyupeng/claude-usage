@@ -52,9 +52,17 @@ final class ModelCatalogService: ObservableObject {
     /// Display name for a logged model ID, or nil to fall back to the raw ID.
     ///
     /// Logged IDs carry provider prefixes and long-context suffixes, so they are
-    /// normalised the same way the rate lookup normalises them.
+    /// normalised the same way the rate lookup normalises them. Dated IDs
+    /// (`claude-haiku-4-5-20251001`) extend a catalog entry rather than matching
+    /// it, so an exact miss falls back to the longest catalog key the ID starts
+    /// with — the same rule the rate lookup applies.
     func displayName(for loggedModelID: String) -> String? {
-        displayNames[CostEstimator.normalizedModelID(loggedModelID)]
+        let id = CostEstimator.normalizedModelID(loggedModelID)
+        if let exact = displayNames[id] { return exact }
+        return displayNames
+            .filter { id.hasPrefix($0.key) }
+            .max { $0.key.count < $1.key.count }?
+            .value
     }
 
     /// Fetches the catalog if the cache is missing or stale. Safe to call often.

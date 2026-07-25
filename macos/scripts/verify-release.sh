@@ -51,6 +51,25 @@ verify_app_bundle() {
     [[ -f "$bundle_resources/en.lproj/Localizable.strings" ]] || { echo "Error: missing packaged localization resource"; exit 1; }
     [[ -d "$sparkle_framework" ]] || { echo "Error: missing Sparkle.framework"; exit 1; }
 
+    # CFBundleVersion is derived from CFBundleShortVersionString by build.sh, but
+    # both live in Info.plist and can be edited independently. A mismatch is
+    # invisible at runtime and breaks update ordering, so fail the release rather
+    # than ship it.
+    echo "==> Verifying version consistency..."
+    local short_version build_version expected_build
+    short_version=$(plutil -extract CFBundleShortVersionString raw "$app_plist")
+    build_version=$(plutil -extract CFBundleVersion raw "$app_plist")
+    if [[ "$short_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+        expected_build=$(( 10#${BASH_REMATCH[1]} * 1000000 + 10#${BASH_REMATCH[2]} * 1000 + 10#${BASH_REMATCH[3]} ))
+        if [[ "$build_version" != "$expected_build" ]]; then
+            echo "Error: CFBundleVersion $build_version does not match $short_version (expected $expected_build)"
+            exit 1
+        fi
+        echo "    $short_version (build $build_version)"
+    else
+        echo "    $short_version (build $build_version) — non-semver, skipping derivation check"
+    fi
+
     echo "==> Verifying app signature..."
     codesign -v "$app_bundle"
 
