@@ -138,11 +138,11 @@ enum CostEstimator {
     /// IDs are normalised first (see `normalizedModelID`), which strips provider
     /// prefixes and the `[1m]` long-context suffix.
     ///
-    /// Long-context requests are standard-priced on Claude 4.6 and later, so
-    /// dropping `[1m]` is exact for those. On the older Sonnet 4 / 4.5 1M beta a
-    /// long-context premium applied above 200K input tokens; that premium is not
-    /// modelled here, so those sessions are under-estimated. Deliberately not
-    /// guessed at — the rate is no longer published.
+    /// Dropping the `[1m]` suffix loses nothing: every model with a 1M-token
+    /// context window has it as the default and bills long-context requests at
+    /// standard pricing, and the models that lack it (Sonnet 4.5 and earlier)
+    /// cap at 200K, so they cannot produce a long-context request to surcharge.
+    /// There is no long-context premium left to model.
     private static let baseRates: [String: Rate] = [
         "claude-fable-5": (10.0, 50.0),
         "claude-mythos-5": (10.0, 50.0),
