@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS (swift test)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Recorded in the log so a toolchain bump that changes behaviour is
+      # traceable to the run that first saw it.
+      - name: Toolchain
+        run: |
+          xcode-select -p
+          swift --version
+
+      - name: Test
+        working-directory: macos
+        run: swift test
+
+  linux:
+    name: Linux (unittest)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Day and minute bucketing is local-time based, so it is exercised
+        # across a whole-hour offset, a half-hour offset, a negative offset and
+        # UTC itself. A UTC-only run would pass even if the bucketing regressed
+        # back to UTC keys.
+        timezone: [UTC, Australia/Sydney, Australia/Adelaide, America/Los_Angeles]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The parser and its tests are pure stdlib — no PyGObject/GTK needed, so
+      # this job installs nothing.
+      - name: Test (TZ=${{ matrix.timezone }})
+        working-directory: linux
+        env:
+          TZ: ${{ matrix.timezone }}
+        run: python3 -m unittest discover -s tests -v
